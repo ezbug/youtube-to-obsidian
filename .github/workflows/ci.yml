@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Install locked Python dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Compile Python sources
+        run: |
+          uv run python -m compileall -q scripts
+          if [ -d vendor ]; then uv run python -m compileall -q vendor; fi
+
+      - name: Check JavaScript sources
+        if: hashFiles('package.json', '**/*.mjs') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install locked Node dependencies
+        if: hashFiles('package.json') != ''
+        run: npm ci --ignore-scripts
+
+      - name: Syntax-check JavaScript
+        if: hashFiles('**/*.mjs') != ''
+        run: find scripts -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
+
+      - name: Reject machine-specific paths
+        run: |
+          ! rg -n --hidden \
+            -g '!**/.git/**' \
+            -g '!**/.venv/**' \
+            -g '!**/node_modules/**' \
+            -g '!**/scripts/doctor.sh' \
+            -g '!**/.github/workflows/ci.yml' \
+            '/Users/|[A-Za-z]:\\\\Users\\\\|\\.openclaw/workspace|\\.claude/mcp-servers|F:\\\\claude學習|claude學習' .

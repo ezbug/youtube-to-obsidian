@@ -23,6 +23,8 @@ def test_no_machine_specific_paths():
             continue
         if path.name == "doctor.sh":
             continue
+        if path.as_posix().endswith(".github/workflows/ci.yml"):
+            continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         assert "/" + "Users/" not in text
         assert ".openclaw/" + "workspace" not in text
