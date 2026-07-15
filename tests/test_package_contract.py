@@ -16,6 +16,21 @@ def test_skill_package_contract():
     assert any(line.startswith("description:") for line in frontmatter[:20])
 
 
+def test_readme_documents_codex_workflow():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    required = (
+        "Codex",
+        "uv sync --frozen",
+        "./scripts/install.sh --target codex --mode symlink",
+        "scripts/extract_subtitles.py",
+        "youtube-transcript-api",
+        "yt-dlp",
+        ".env.example",
+    )
+    for item in required:
+        assert item in readme
+
+
 def test_no_machine_specific_paths():
     ignored = {".venv", "node_modules", ".git", "__pycache__"}
     for path in ROOT.rglob("*"):
