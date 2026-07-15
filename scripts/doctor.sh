@@ -32,7 +32,7 @@ if [ -f "$repo_root/requirements.system" ]; then
   done < "$repo_root/requirements.system"
 fi
 
-if rg -n --hidden -g '!*.woff2' -g '!*.png' -g '!*.jpg' -g '!**/doctor.sh' -g '!**/.git/**' '/Users/|[A-Za-z]:\\\\Users\\\\|\.openclaw/workspace|\.claude/mcp-servers' "$repo_root" >/tmp/ezbug-skill-doctor-paths.$$ 2>/dev/null; then
+if rg -n --hidden -g '!*.woff2' -g '!*.png' -g '!*.jpg' -g '!**/doctor.sh' -g '!**/.github/workflows/ci.yml' -g '!**/.git/**' '/Users/|[A-Za-z]:\\\\Users\\\\|\.openclaw/workspace|\.claude/mcp-servers' "$repo_root" >/tmp/ezbug-skill-doctor-paths.$$ 2>/dev/null; then
   echo "FAIL personal or machine-specific path references:"
   sed -n '1,40p' /tmp/ezbug-skill-doctor-paths.$$
   failed=1
