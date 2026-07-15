@@ -1,0 +1,29 @@
+[project]
+name = "youtube-to-obsidian"
+version = "0.1.0"
+description = "YouTube video-to-Obsidian workflow."
+requires-python = ">=3.11"
+dependencies = [
+  "yt-dlp>=2024.8,<2027",
+  "youtube-transcript-api>=0.6,<2",
+]
+
+[project.optional-dependencies]
+ocr = [
+  "opencv-python>=4.9,<5",
+  "paddleocr>=3,<4",
+]
+whisper = [
+  "openai-whisper>=20231117",
+]
+dev = [
+  "pytest>=8,<9",
+]
+full = [
+  "opencv-python>=4.9,<5",
+  "paddleocr>=3,<4",
+  "openai-whisper>=20231117",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
