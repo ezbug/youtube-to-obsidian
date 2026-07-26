@@ -20,7 +20,7 @@ _FORBIDDEN_KEY_PARTS = (
     "html",
     "svg",
 )
-_SENTINEL = "evidence_leak_sentinel_9f2a"
+_SENTINELS = ("evidence_sentinel", "evidence_leak_sentinel_9f2a")
 _IMAGE_SUFFIXES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 
@@ -70,7 +70,9 @@ def _reject_evidence(value, path: str = "note") -> None:
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _reject_evidence(child, f"{path}[{index}]")
-    elif isinstance(value, str) and _SENTINEL in value.casefold():
+    elif isinstance(value, str) and any(
+        sentinel in value.casefold() for sentinel in _SENTINELS
+    ):
         _fail(f"{path} contains the evidence sentinel")
 
 

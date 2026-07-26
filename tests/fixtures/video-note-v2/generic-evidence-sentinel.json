@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "generic-sentinel", "source_url": "https://example.test/generic-sentinel", "title": "Generic sentinel", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Reader text with embedded EVIDENCE_SENTINEL marker.",
+  "sections": [{"id": "generic-sentinel", "title": "Generic sentinel", "summary": "Sentinel.", "blocks": [{"id": "generic-sentinel-text", "type": "paragraph", "text": "prefix evidence_sentinel suffix"}]}]
+}

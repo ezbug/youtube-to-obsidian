@@ -86,6 +86,7 @@ def test_normalization_applies_shared_defaults():
         "duplicate-id.json",
         "forbidden-evidence.json",
         "evidence-sentinel.json",
+        "generic-evidence-sentinel.json",
     ],
 )
 def test_invalid_fixtures_are_rejected(name):
@@ -277,13 +278,23 @@ def test_malformed_legacy_row_reports_its_section_and_row_index():
 
 @pytest.mark.parametrize(
     "sentinel",
-    ["EVIDENCE_LEAK_SENTINEL_9F2A", "evidence_leak_sentinel_9f2a"],
+    [
+        "EVIDENCE_LEAK_SENTINEL_9F2A",
+        "evidence_leak_sentinel_9f2a",
+        "EVIDENCE_SENTINEL",
+        "evidence_sentinel",
+    ],
 )
-def test_exact_evidence_leak_sentinel_is_rejected_case_insensitively(sentinel):
+def test_evidence_sentinels_are_rejected_case_insensitively_when_embedded(sentinel):
     note = fixture("minimal.json")
     note["sections"][0]["blocks"][0]["text"] = f"prefix {sentinel} suffix"
     with pytest.raises(ValueError, match="sentinel"):
         normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_normalization_has_one_meta_object_assignment():
+    source = (ROOT / "scripts" / "render_html.py").read_text(encoding="utf-8")
+    assert source.count('meta = _object(note["meta"], "meta")') == 1
 
 
 def test_legacy_mapping_ignores_unmapped_caller_metadata():
