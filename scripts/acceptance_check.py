@@ -364,6 +364,8 @@ LAYOUT_CODE = """async page => {
     const cards = document.querySelector('.feature-grid, .cards');
     const shellStyle = shell ? getComputedStyle(shell) : null;
     const cardsStyle = cards ? getComputedStyle(cards) : null;
+    const flowFigure = document.querySelector('.flow-diagram');
+    const flowSvg = flowFigure?.querySelector('svg');
     const columns = style => {
       if (!style || style === 'none') return 0;
       return style.split(' ').filter(Boolean).length;
@@ -394,6 +396,20 @@ LAYOUT_CODE = """async page => {
         gridTemplateColumns: cardsStyle?.gridTemplateColumns || null,
         columnCount: columns(cardsStyle?.gridTemplateColumns)
       },
+      flowDiagram: (() => {
+        if (!flowFigure || !flowSvg) return null;
+        const figureBox = flowFigure.getBoundingClientRect();
+        const svgBox = flowSvg.getBoundingClientRect();
+        return {
+          clientWidth: flowFigure.clientWidth,
+          scrollWidth: flowFigure.scrollWidth,
+          figure: {left: figureBox.left, right: figureBox.right, width: figureBox.width},
+          svg: {left: svgBox.left, right: svgBox.right, width: svgBox.width},
+          fullyVisible: svgBox.left >= figureBox.left - 1 &&
+            svgBox.right <= figureBox.right + 1 &&
+            flowFigure.scrollWidth <= flowFigure.clientWidth
+        };
+      })(),
       callouts: Object.fromEntries(
         ['key', 'source', 'recommendation', 'inference', 'notice'].map(kind => {
           const element = document.querySelector(`.callout-${kind}`);
@@ -792,32 +808,64 @@ def _run_offline(
     run_nonce: str,
     cleanup: list[dict],
 ) -> tuple[dict, dict]:
+    formats = {
+        "jpeg": ("jpeg.json", "image/jpeg"),
+        "png": ("png.json", "image/png"),
+        "webp": ("webp.json", "image/webp"),
+    }
+    output_dir = root / "acceptance" / "offline-media"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated = {}
+    paths = {}
+    for name, (fixture_name, expected_mime) in formats.items():
+        output = output_dir / f"{name}.html"
+        metadata = _generate_candidate(
+            root,
+            root / "tests" / "fixtures" / "video-note-v2" / fixture_name,
+            output,
+        )
+        generated[name] = {
+            "path": str(output.relative_to(root)),
+            "sha256": metadata["sha256"],
+            "bytes": metadata["bytes"],
+            "expectedMime": expected_mime,
+        }
+        paths[name] = output
+
     session = _session("offline", root, run_nonce)
     cli.open(session)
     try:
         cli.attach_events(session)
         cli.run(session, "resize", "390", "844")
-        cli.run(session, "goto", _path_url(candidate_path))
         cli.run(session, "network-state-set", "offline")
-        cli.run(session, "reload")
-        result = cli.value(
-            session,
-            """async page => page.evaluate(() => ({
-              urlScheme: location.protocol,
-              title: document.title,
-              sectionCount: document.querySelectorAll('section').length,
-              images: [...document.images].map(image => ({
-                srcScheme: image.src.split(':', 1)[0],
-                complete: image.complete,
-                naturalWidth: image.naturalWidth
-              })),
-              embeddedContentVisible: [...document.querySelectorAll('section')].every(section =>
-                section.getBoundingClientRect().height > 0
-              )
-            }))""",
-        )
+        results = {}
+        for name, output in paths.items():
+            cli.run(session, "goto", _path_url(output))
+            cli.run(session, "reload")
+            results[name] = cli.value(
+                session,
+                """async page => page.evaluate(() => ({
+                  urlScheme: location.protocol,
+                  title: document.title,
+                  sectionCount: document.querySelectorAll('section').length,
+                  images: [...document.images].map(image => {
+                    const source = image.currentSrc || image.src;
+                    const match = /^data:([^;,]+)/.exec(source);
+                    return {
+                      srcScheme: source.split(':', 1)[0],
+                      srcMime: match ? match[1] : null,
+                      complete: image.complete,
+                      naturalWidth: image.naturalWidth,
+                      naturalHeight: image.naturalHeight
+                    };
+                  }),
+                  embeddedContentVisible: [...document.querySelectorAll('section')].every(section =>
+                    section.getBoundingClientRect().height > 0
+                  )
+                }))""",
+            )
         cli.run(session, "network-state-set", "online")
-        return result, cli.events(session)
+        return {"generation": generated, "formats": results}, cli.events(session)
     finally:
         cleanup.append(cli.close(session, "offline"))
 
@@ -983,6 +1031,13 @@ def _hard_checks(
         candidate["390"]["featureGrid"]["columnCount"] == 1,
         candidate["390"]["featureGrid"]["columnCount"],
         1,
+    )
+    mobile_flow = candidate["390"]["flowDiagram"]
+    add(
+        "390 flow diagram fully visible",
+        mobile_flow is not None and mobile_flow["fullyVisible"],
+        mobile_flow,
+        "SVG fully fits its container without nested horizontal scrolling",
     )
     for name, expected in COLOR_TOKENS.items():
         actual = candidate["1440"]["colors"][name]
@@ -1212,19 +1267,23 @@ def _hard_checks(
         "all labelled",
     )
     add(
-        "offline self-contained content",
-        offline["urlScheme"] == "file:"
-        and offline["sectionCount"] > 0
-        and offline["embeddedContentVisible"]
-        and bool(offline["images"])
+        "offline JPEG PNG WebP self-contained content",
+        set(offline["formats"]) == {"jpeg", "png", "webp"}
         and all(
-            image["srcScheme"] == "data"
-            and image["complete"]
-            and image["naturalWidth"] > 0
-            for image in offline["images"]
+            result["urlScheme"] == "file:"
+            and result["sectionCount"] > 0
+            and result["embeddedContentVisible"]
+            and len(result["images"]) == 1
+            and result["images"][0]["srcScheme"] == "data"
+            and result["images"][0]["srcMime"]
+            == offline["generation"][name]["expectedMime"]
+            and result["images"][0]["complete"]
+            and result["images"][0]["naturalWidth"] > 0
+            and result["images"][0]["naturalHeight"] > 0
+            for name, result in offline["formats"].items()
         ),
         offline,
-        "file URL, visible sections, complete embedded data images",
+        "file URL reload with decoded embedded JPEG, PNG, and WebP",
     )
     print_media = print_result["print_media"]
     add(

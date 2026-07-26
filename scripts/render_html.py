@@ -711,7 +711,7 @@ pre{margin:0;padding:52px 18px 18px;color:#e9edf5;overflow:auto;font-size:13px;l
 .copy{position:absolute;right:10px;top:10px;border:0;border-radius:9px;padding:7px 10px;cursor:pointer}
 .copy-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .flow-diagram{margin:16px 0;border:1px solid var(--border);border-radius:16px;background:#fafbfe;overflow:auto}
-.flow-diagram svg{display:block;width:100%;min-width:360px;height:auto}
+.flow-diagram svg{display:block;width:100%;height:auto}
 .flow-edge{stroke:var(--accent);stroke-width:3;fill:none}
 .flow-node{fill:#fff;stroke:var(--border);stroke-width:2}
 .flow-node-label{fill:var(--text);font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}

@@ -41,6 +41,8 @@ def _run_case(
     profile: str,
     expected_exit: int,
     output_parent_is_file: bool = False,
+    preserve_output: Path | None = None,
+    expected_mime: str | None = None,
 ) -> dict:
     if output_parent_is_file:
         parent = work / f"{name}-parent"
@@ -63,6 +65,21 @@ def _run_case(
     ]
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     after_hash = _sha256(output) if output.is_file() else None
+    embedded_expected_mime = None
+    preserved_artifact = None
+    if completed.returncode == 0 and output.is_file():
+        rendered = output.read_text(encoding="utf-8")
+        embedded_expected_mime = (
+            f"data:{expected_mime};base64," in rendered
+            if expected_mime
+            else None
+        )
+        if preserve_output is not None:
+            preserve_output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(output, preserve_output)
+            preserved_artifact = (
+                f"{preserve_output.parent.name}/{preserve_output.name}"
+            )
     clean = lambda text: text.replace(str(ROOT), "<REPO>").replace(  # noqa: E731
         str(work), "<WORK>"
     )
@@ -87,8 +104,12 @@ def _run_case(
         "output_sha256_before": before_hash,
         "output_sha256_after": after_hash,
         "atomic_output_preserved": atomic_preserved,
+        "preserved_artifact": preserved_artifact,
+        "expected_mime": expected_mime,
+        "embedded_expected_mime": embedded_expected_mime,
         "passed": completed.returncode == expected_exit
-        and (atomic_preserved is not False),
+        and (atomic_preserved is not False)
+        and (embedded_expected_mime is not False),
     }
 
 
@@ -100,6 +121,13 @@ def generate(output_dir: Path) -> dict:
     shutil.copyfile(SCHEMA, schema_output)
     for fixture in sorted(FIXTURES.glob("*.json")):
         shutil.copyfile(fixture, fixture_output / fixture.name)
+    shutil.copytree(
+        FIXTURES / "media",
+        fixture_output / "media",
+        dirs_exist_ok=True,
+    )
+    rendered_output = output_dir / "outputs"
+    rendered_output.mkdir(parents=True, exist_ok=True)
 
     all_blocks = FIXTURES / "all-blocks.json"
     normalized = normalize_video_note(
@@ -128,6 +156,33 @@ def generate(output_dir: Path) -> dict:
                 note=all_blocks,
                 profile="email",
                 expected_exit=0,
+            ),
+            _run_case(
+                work,
+                name="valid-jpeg-web",
+                note=FIXTURES / "jpeg.json",
+                profile="web",
+                expected_exit=0,
+                preserve_output=rendered_output / "jpeg-web.html",
+                expected_mime="image/jpeg",
+            ),
+            _run_case(
+                work,
+                name="valid-png-web",
+                note=FIXTURES / "png.json",
+                profile="web",
+                expected_exit=0,
+                preserve_output=rendered_output / "png-web.html",
+                expected_mime="image/png",
+            ),
+            _run_case(
+                work,
+                name="valid-webp-web",
+                note=FIXTURES / "webp.json",
+                profile="web",
+                expected_exit=0,
+                preserve_output=rendered_output / "webp-web.html",
+                expected_mime="image/webp",
             ),
             _run_case(
                 work,

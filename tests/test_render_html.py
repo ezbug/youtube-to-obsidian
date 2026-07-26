@@ -141,6 +141,7 @@ def test_all_blocks_have_semantics_and_renderer_owned_interactions():
     )
     for fragment in expected:
         assert fragment in document
+    assert "min-width:360px" not in document
     for forbidden in ("innerHTML", "fetch(", "alert(", "console."):
         assert forbidden not in document
     assert not re.search(r'tabindex="[1-9]', document)

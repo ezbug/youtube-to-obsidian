@@ -15,7 +15,7 @@ def test_contract_evidence_is_direct_portable_and_complete(tmp_path):
     assert result["schema_sha256"] == (
         "9255bbdf4965221faac53972a7f66b1d644588376047fb243716c9495e16c2fd"
     )
-    assert len(result["cli_cases"]) == 10
+    assert len(result["cli_cases"]) == 13
     assert {case["actual_exit"] for case in result["cli_cases"]} >= {0, 2, 3}
     assert all(case["passed"] for case in result["cli_cases"])
     assert all(
@@ -27,6 +27,18 @@ def test_contract_evidence_is_direct_portable_and_complete(tmp_path):
     assert (tmp_path / "contract" / "legacy-output.html").is_file()
     assert (tmp_path / "contract" / "normalized-all-blocks.json").is_file()
     assert (tmp_path / "contract" / "fixtures" / "malicious.json").is_file()
+    for name, mime in (
+        ("jpeg", "image/jpeg"),
+        ("png", "image/png"),
+        ("webp", "image/webp"),
+    ):
+        suffix = "jpg" if name == "jpeg" else name
+        assert (
+            tmp_path / "contract" / "fixtures" / "media" / f"frame.{suffix}"
+        ).is_file()
+        output = tmp_path / "contract" / "outputs" / f"{name}-web.html"
+        assert output.is_file()
+        assert f"data:{mime};base64," in output.read_text(encoding="utf-8")
     assert "/" + "Users/" not in (
         tmp_path / "contract" / "contract-results.json"
     ).read_text(encoding="utf-8")
