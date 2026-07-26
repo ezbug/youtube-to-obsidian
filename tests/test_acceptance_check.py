@@ -196,7 +196,7 @@ def test_pdf_settings_and_page_box_require_a4():
     assert PDF_SETTINGS == {
         "format": "A4",
         "printBackground": True,
-        "margins": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
+        "margin": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
     }
     assert _pdf_page_box_is_a4(
         {"pageCount": 4, "mediaBox": [0.0, 0.0, 595.92, 842.88]}
@@ -228,6 +228,9 @@ def test_reference_defects_require_the_exact_favicon_probe_and_no_extra_errors()
 
     assert status["approved"]
     assert status["favicon"]["url"] == "http://127.0.0.1:4567/favicon.ico"
+    reference["viewports"]["390"]["document"]["scrollWidth"] = 395
+    assert not _reference_defect_status(reference, events)["approved"]
+    reference["viewports"]["390"]["document"]["scrollWidth"] = 394
     events["pageErrors"].append("unexpected")
     assert not _reference_defect_status(reference, events)["approved"]
 

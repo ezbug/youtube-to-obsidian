@@ -64,7 +64,7 @@ COLOR_TOKENS = {
 PDF_SETTINGS = {
     "format": "A4",
     "printBackground": True,
-    "margins": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
+    "margin": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
 }
 PDF_A4_POINTS = (595.28, 841.89)
 PDF_A4_TOLERANCE_POINTS = 2.0
@@ -186,7 +186,8 @@ def _reference_defect_status(reference: dict, events: dict) -> dict:
     unexpected_console = [event for event in events["consoleErrors"] if not (event.get("text") == _FAVICON_CONSOLE_ERROR and event.get("url") == probe["url"])]
     unexpected_http = [event for event in events["httpErrors"] if not (event.get("status") == 404 and event.get("url") == probe["url"])]
     approved = (
-        overflow["scrollWidth"] > overflow["clientWidth"]
+        overflow["scrollWidth"] == 394
+        and overflow["clientWidth"] == 390
         and probe["iconLinks"] == []
         and probe["url"] == expected_url
         and probe["status"] == 404
