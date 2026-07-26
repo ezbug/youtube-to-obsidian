@@ -32,7 +32,7 @@ def test_readme_documents_codex_workflow():
 
 
 def test_no_machine_specific_paths():
-    ignored = {".venv", "node_modules", ".git", "__pycache__"}
+    ignored = {".venv", "node_modules", ".git", "__pycache__", "acceptance"}
     for path in ROOT.rglob("*"):
         if not path.is_file() or any(part in ignored for part in path.parts):
             continue
