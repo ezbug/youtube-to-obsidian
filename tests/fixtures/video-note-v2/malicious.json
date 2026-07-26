@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "bad", "source_url": "https://example.test/bad", "title": "Bad", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Bad.",
+  "sections": [{"id": "bad", "title": "Bad", "summary": "Bad.", "blocks": [{"id": "bad-flow", "type": "flow", "svg": "<svg onload=alert(1)>", "nodes": [], "edges": []}]}]
+}

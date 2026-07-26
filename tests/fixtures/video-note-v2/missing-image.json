@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "missing", "source_url": "https://example.test/missing", "title": "Missing", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Missing image.",
+  "sections": [{"id": "missing", "title": "Missing", "summary": "Missing.", "blocks": [{"id": "missing-media", "type": "media", "image": "media/nope.png", "alt": "Missing image", "headline": "Missing", "explanation": "Missing."}]}]
+}

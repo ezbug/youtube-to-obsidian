@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "unknown", "source_url": "https://example.test/unknown", "title": "Unknown", "author": "Author", "duration_seconds": 1, "language": "en", "tracking": "no"},
+  "summary": "Unknown field.",
+  "sections": [{"id": "unknown", "title": "Unknown", "summary": "Unknown.", "blocks": [{"id": "unknown-text", "type": "paragraph", "text": "Unknown."}]}]
+}

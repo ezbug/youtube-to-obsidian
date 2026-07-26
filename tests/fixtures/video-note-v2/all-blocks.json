@@ -1,0 +1,37 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {
+    "platform": "example",
+    "source_id": "all-blocks",
+    "source_url": "https://example.test/video/all-blocks",
+    "title": "All blocks",
+    "author": "Author",
+    "duration_seconds": 120,
+    "language": "en"
+  },
+  "summary": "Everything supported.",
+  "sections": [
+    {
+      "id": "alpha",
+      "title": "Alpha",
+      "summary": "All safe block kinds.",
+      "blocks": [
+        {"id": "alpha-paragraph", "type": "paragraph", "text": "A paragraph."},
+        {"id": "alpha-callout", "type": "callout", "kind": "key", "text": "A key point."},
+        {"id": "alpha-list", "type": "list", "items": ["First", "Second"]},
+        {"id": "alpha-table", "type": "table", "columns": [{"id": "name", "label": "Name"}], "rows": [{"name": "One"}]},
+        {"id": "alpha-media", "type": "media", "image": "media/frame.jpg", "alt": "Frame", "headline": "A frame", "explanation": "What the frame shows."},
+        {"id": "alpha-grid", "type": "feature_grid", "cards": [{"id": "card-1", "category": "setup", "title": "Card", "description": "A filterable card.", "link": "https://example.test/card"}]},
+        {"id": "alpha-code", "type": "code", "text": "print('safe')"},
+        {"id": "alpha-flow", "type": "flow", "nodes": [{"id": "start", "label": "Start"}, {"id": "end", "label": "End"}], "edges": [{"from": "start", "to": "end", "label": "next"}]},
+        {"id": "alpha-accordion", "type": "accordion", "title": "Details", "blocks": [{"id": "alpha-accordion-text", "type": "paragraph", "text": "Nested text."}, {"id": "alpha-accordion-list", "type": "list", "items": ["Nested item"]}]}
+      ]
+    },
+    {
+      "id": "zeta",
+      "title": "Zeta",
+      "summary": "A second section.",
+      "blocks": [{"id": "zeta-text", "type": "paragraph", "text": "Last."}]
+    }
+  ]
+}

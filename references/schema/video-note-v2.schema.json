@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-note.dev/schema/video-note-v2.schema.json",
+  "title": "Video note v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "meta", "summary", "sections"],
+  "properties": {
+    "schema_version": {"const": "video-note/v2"},
+    "meta": {"$ref": "#/$defs/meta"},
+    "summary": {"type": "string", "minLength": 1},
+    "sections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/section"}}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"],
+      "properties": {
+        "platform": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string", "minLength": 1},
+        "source_url": {"type": "string", "format": "uri"},
+        "title": {"type": "string", "minLength": 1},
+        "author": {"type": "string"},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "language": {"type": "string", "minLength": 1}
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "summary", "blocks"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "blocks": {"type": "array", "items": {"$ref": "#/$defs/block"}}
+      }
+    },
+    "block": {
+      "oneOf": [
+        {"$ref": "#/$defs/paragraph"},
+        {"$ref": "#/$defs/callout"},
+        {"$ref": "#/$defs/list"},
+        {"$ref": "#/$defs/table"},
+        {"$ref": "#/$defs/media"},
+        {"$ref": "#/$defs/feature_grid"},
+        {"$ref": "#/$defs/code"},
+        {"$ref": "#/$defs/flow"},
+        {"$ref": "#/$defs/accordion"}
+      ]
+    },
+    "paragraph": {"type": "object", "additionalProperties": false, "required": ["id", "type", "text"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "paragraph"}, "text": {"type": "string", "minLength": 1}}},
+    "callout": {"type": "object", "additionalProperties": false, "required": ["id", "type", "kind", "text"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "callout"}, "kind": {"enum": ["key", "source", "recommendation", "inference", "notice"]}, "text": {"type": "string", "minLength": 1}}},
+    "list": {"type": "object", "additionalProperties": false, "required": ["id", "type", "items"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "list"}, "items": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+    "table": {"type": "object", "additionalProperties": false, "required": ["id", "type", "columns", "rows"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "table"}, "columns": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/column"}}, "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}}}},
+    "column": {"type": "object", "additionalProperties": false, "required": ["id", "label"], "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}}},
+    "row": {"type": "object", "additionalProperties": false, "patternProperties": {".*": {"type": ["string", "number"]}}},
+    "media": {"type": "object", "additionalProperties": false, "required": ["id", "type", "image", "alt", "headline", "explanation"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "media"}, "image": {"type": "string", "minLength": 1}, "alt": {"type": "string", "minLength": 1}, "headline": {"type": "string", "minLength": 1}, "explanation": {"type": "string", "minLength": 1}, "usage": {"type": "string"}, "timestamp_seconds": {"type": ["number", "null"], "minimum": 0}, "deep_link": {"type": ["string", "null"], "format": "uri"}}},
+    "feature_grid": {"type": "object", "additionalProperties": false, "required": ["id", "type", "cards"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "feature_grid"}, "filter_label": {"type": "string", "minLength": 1}, "cards": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/feature_card"}}}},
+    "feature_card": {"type": "object", "additionalProperties": false, "required": ["id", "category", "title", "description"], "properties": {"id": {"type": "string", "minLength": 1}, "category": {"type": "string", "minLength": 1}, "title": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "link": {"type": ["string", "null"], "format": "uri"}}},
+    "code": {"type": "object", "additionalProperties": false, "required": ["id", "type", "text"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "code"}, "text": {"type": "string"}, "language": {"type": "string", "minLength": 1}}},
+    "flow": {"type": "object", "additionalProperties": false, "required": ["id", "type", "nodes", "edges"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "flow"}, "nodes": {"type": "array", "items": {"$ref": "#/$defs/flow_node"}}, "edges": {"type": "array", "items": {"$ref": "#/$defs/flow_edge"}}}},
+    "flow_node": {"type": "object", "additionalProperties": false, "required": ["id", "label"], "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}}},
+    "flow_edge": {"type": "object", "additionalProperties": false, "required": ["from", "to"], "properties": {"from": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}, "label": {"type": "string"}}},
+    "accordion": {"type": "object", "additionalProperties": false, "required": ["id", "type", "title", "blocks"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "accordion"}, "title": {"type": "string", "minLength": 1}, "blocks": {"type": "array", "minItems": 1, "items": {"oneOf": [{"$ref": "#/$defs/paragraph"}, {"$ref": "#/$defs/list"}, {"$ref": "#/$defs/callout"}]}}}}
+  }
+}

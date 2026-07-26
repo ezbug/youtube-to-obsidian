@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "url", "source_url": "javascript:alert(1)", "title": "URL", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Bad URL.",
+  "sections": [{"id": "url", "title": "URL", "summary": "URL.", "blocks": [{"id": "url-text", "type": "paragraph", "text": "Bad URL."}]}]
+}

@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "webp", "source_url": "https://example.test/webp", "title": "WebP", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "WebP media.",
+  "sections": [{"id": "webp", "title": "WebP", "summary": "WebP section.", "blocks": [{"id": "webp-media", "type": "media", "image": "media/frame.webp", "alt": "WebP image", "headline": "WebP", "explanation": "A WebP."}]}]
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {
+    "platform": "bilibili",
+    "source_id": "BV1Full",
+    "source_url": "https://www.bilibili.com/video/BV1Full",
+    "title": "Full note",
+    "author": "Author",
+    "duration_seconds": 61,
+    "language": "zh-CN"
+  },
+  "summary": "A complete summary.",
+  "sections": [
+    {
+      "id": "full",
+      "title": "Complete",
+      "summary": "A complete section.",
+      "blocks": [
+        {
+          "id": "full-table",
+          "type": "table",
+          "columns": [{"id": "tool", "label": "Tool"}, {"id": "purpose", "label": "Purpose"}],
+          "rows": [{"tool": "Map", "purpose": "Orient"}]
+        },
+        {
+          "id": "full-media",
+          "type": "media",
+          "image": "media/frame.jpg",
+          "alt": "A test frame",
+          "headline": "Frame",
+          "explanation": "A safe image explanation."
+        }
+      ]
+    }
+  ]
+}

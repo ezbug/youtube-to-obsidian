@@ -1,0 +1,27 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {
+    "platform": "youtube",
+    "source_id": "abc123",
+    "source_url": "https://www.youtube.com/watch?v=abc123",
+    "title": "Minimal note",
+    "author": "Author",
+    "duration_seconds": 0,
+    "language": "en"
+  },
+  "summary": "A compact summary.",
+  "sections": [
+    {
+      "id": "intro",
+      "title": "Introduction",
+      "summary": "The first section.",
+      "blocks": [
+        {
+          "id": "intro-text",
+          "type": "paragraph",
+          "text": "Safe reader-facing text."
+        }
+      ]
+    }
+  ]
+}

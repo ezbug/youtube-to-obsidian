@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "evidence", "source_url": "https://example.test/evidence", "title": "Evidence", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Evidence is forbidden.",
+  "sections": [{"id": "evidence", "title": "Evidence", "summary": "Evidence.", "blocks": [{"id": "evidence-accordion", "type": "accordion", "title": "Nested", "blocks": [{"id": "nested", "type": "paragraph", "text": "No evidence.", "evidence": "raw subtitle"}]}]}]
+}

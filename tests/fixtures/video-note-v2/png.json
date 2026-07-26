@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "png", "source_url": "https://example.test/png", "title": "PNG", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "PNG media.",
+  "sections": [{"id": "png", "title": "PNG", "summary": "PNG section.", "blocks": [{"id": "png-media", "type": "media", "image": "media/frame.png", "alt": "PNG image", "headline": "PNG", "explanation": "A PNG."}]}]
+}

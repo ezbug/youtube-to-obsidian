@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "duplicate", "source_url": "https://example.test/duplicate", "title": "Duplicate", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "Duplicate IDs.",
+  "sections": [{"id": "duplicate", "title": "Duplicate", "summary": "Duplicate.", "blocks": [{"id": "same", "type": "paragraph", "text": "One."}, {"id": "same", "type": "paragraph", "text": "Two."}]}]
+}

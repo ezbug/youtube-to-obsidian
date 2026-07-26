@@ -1,0 +1,6 @@
+{
+  "schema_version": "video-note/v2",
+  "meta": {"platform": "example", "source_id": "sentinel", "source_url": "https://example.test/sentinel", "title": "Sentinel", "author": "Author", "duration_seconds": 1, "language": "en"},
+  "summary": "EVIDENCE_SENTINEL",
+  "sections": [{"id": "sentinel", "title": "Sentinel", "summary": "Sentinel.", "blocks": [{"id": "sentinel-text", "type": "paragraph", "text": "EVIDENCE_SENTINEL"}]}]
+}
