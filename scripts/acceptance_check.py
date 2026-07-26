@@ -129,8 +129,11 @@ def normalize_for_parity(value, *, repo_root: Path | None = None):
         }
     if isinstance(value, list):
         return [normalize_for_parity(child, repo_root=repo_root) for child in value]
-    if isinstance(value, str) and repo_root is not None:
-        return value.replace(str(repo_root), "<REPO>")
+    if isinstance(value, str):
+        normalized = value
+        if repo_root is not None:
+            normalized = normalized.replace(str(repo_root), "<REPO>")
+        return re.sub(r"http://127\.0\.0\.1:\d+", "http://127.0.0.1:<PORT>", normalized)
     return value
 
 

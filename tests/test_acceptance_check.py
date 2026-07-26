@@ -131,6 +131,20 @@ def test_normalize_for_parity_marks_pdf_runtime_hash_as_volatile():
     }
 
 
+def test_normalize_for_parity_replaces_only_loopback_runtime_ports():
+    value = {
+        "favicon": "http://127.0.0.1:43123/favicon.ico",
+        "origin": "http://127.0.0.1:51234",
+        "external": "https://example.test:43123/kept",
+    }
+
+    assert normalize_for_parity(value) == {
+        "favicon": "http://127.0.0.1:<PORT>/favicon.ico",
+        "origin": "http://127.0.0.1:<PORT>",
+        "external": "https://example.test:43123/kept",
+    }
+
+
 def test_candidate_event_counts_cover_every_browser_phase():
     empty = {
         "consoleErrors": [],
