@@ -1162,7 +1162,7 @@ def render_video_note(
 <a class="skip-link" href="#vn-owned-main">跳到主要内容</a>
 <div class="shell">
 <nav aria-label="视频笔记目录"><strong>目录</strong>{navigation}</nav>
-<main id="vn-owned-main">
+<main id="vn-owned-main" tabindex="-1">
 <header class="hero">
 <span class="badge">{badge}</span>
 <h1>{title}</h1>

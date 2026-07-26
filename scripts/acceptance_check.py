@@ -8,6 +8,8 @@ import copy
 import hashlib
 import json
 import os
+import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
+from urllib.parse import urlsplit
 
 
 PINNED_PLAYWRIGHT_COMMAND = (
@@ -58,6 +61,14 @@ COLOR_TOKENS = {
     "--cyan": "#0f8b99",
     "--r": "18px",
 }
+PDF_SETTINGS = {
+    "format": "A4",
+    "printBackground": True,
+    "margins": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
+}
+PDF_A4_POINTS = (595.28, 841.89)
+PDF_A4_TOLERANCE_POINTS = 2.0
+_FAVICON_CONSOLE_ERROR = "Failed to load resource: the server responded with a status of 404 (File not found)"
 _VOLATILE_PARITY_KEYS = {
     "repository",
     "repo_root",
@@ -149,6 +160,55 @@ def aggregate_candidate_events(event_sets: list[dict] | tuple[dict, ...]) -> dic
     }
 
 
+def _copy_matches_source(result: dict) -> bool:
+    return (
+        result.get("announcement") == "已复制"
+        and result.get("ariaLive") == "polite"
+        and bool(result.get("sourceText"))
+        and result.get("clipboardText") == result.get("sourceText")
+    )
+
+
+def _pdf_page_box_is_a4(box: dict) -> bool:
+    media_box = box.get("mediaBox", [])
+    return (
+        box.get("pageCount", 0) > 0
+        and len(media_box) == 4
+        and abs((media_box[2] - media_box[0]) - PDF_A4_POINTS[0]) <= PDF_A4_TOLERANCE_POINTS
+        and abs((media_box[3] - media_box[1]) - PDF_A4_POINTS[1]) <= PDF_A4_TOLERANCE_POINTS
+    )
+
+
+def _reference_defect_status(reference: dict, events: dict) -> dict:
+    probe = reference["faviconProbe"]
+    overflow = reference["viewports"]["390"]["document"]
+    expected_url = f"{urlsplit(probe['documentUrl']).scheme}://{urlsplit(probe['documentUrl']).netloc}/favicon.ico"
+    unexpected_console = [event for event in events["consoleErrors"] if not (event.get("text") == _FAVICON_CONSOLE_ERROR and event.get("url") == probe["url"])]
+    unexpected_http = [event for event in events["httpErrors"] if not (event.get("status") == 404 and event.get("url") == probe["url"])]
+    approved = (
+        overflow["scrollWidth"] > overflow["clientWidth"]
+        and probe["iconLinks"] == []
+        and probe["url"] == expected_url
+        and probe["status"] == 404
+        and bool(events["consoleErrors"])
+        and not unexpected_console
+        and not events["pageErrors"]
+        and not events["requestFailures"]
+        and not unexpected_http
+    )
+    return {"approved": approved, "overflow": overflow, "favicon": probe, "unexpected": {"consoleErrors": unexpected_console, "pageErrors": events["pageErrors"], "requestFailures": events["requestFailures"], "httpErrors": unexpected_http}}
+
+
+def _inspect_pdf_page_box(path: Path) -> dict:
+    result = subprocess.run(["pdfinfo", "-box", str(path)], capture_output=True, text=True, check=False)
+    output = result.stdout
+    page_count = re.search(r"^Pages:\s+(\d+)$", output, re.MULTILINE)
+    media_box = re.search(r"^MediaBox:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)$", output, re.MULTILINE)
+    if result.returncode or not page_count or not media_box:
+        return {"inspector": "pdfinfo -box", "ok": False, "returncode": result.returncode, "output": output, "stderr": result.stderr, "pageCount": 0, "mediaBox": []}
+    return {"inspector": "pdfinfo -box", "ok": True, "pageCount": int(page_count.group(1)), "mediaBox": [float(value) for value in media_box.groups()]}
+
+
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -227,11 +287,12 @@ class PlaywrightCLI:
     def open(self, session: str) -> None:
         self.run(session, "open", "about:blank")
 
-    def close(self, session: str) -> None:
+    def close(self, session: str, phase: str) -> dict:
         try:
             self.run(session, "close", timeout=30)
-        except Exception:
-            pass
+            return {"phase": phase, "closed": True}
+        except Exception as exc:
+            return {"phase": phase, "closed": False, "error": str(exc)}
 
     def attach_events(self, session: str) -> None:
         self.value(
@@ -243,7 +304,7 @@ class PlaywrightCLI:
               };
               page.on('console', message => {
                 if (message.type() === 'error')
-                  page.__task5Events.consoleErrors.push(message.text());
+                  page.__task5Events.consoleErrors.push({text: message.text(), url: message.location().url || null});
               });
               page.on('pageerror', error => {
                 page.__task5Events.pageErrors.push(String(error));
@@ -351,9 +412,9 @@ def _served_url(port: int, relative_path: Path) -> str:
     return f"http://127.0.0.1:{port}/" + quote(relative_path.as_posix())
 
 
-def _session(prefix: str, root: Path) -> str:
+def _session(prefix: str, root: Path, run_nonce: str) -> str:
     suffix = hashlib.sha256(str(root).encode()).hexdigest()[:8]
-    return f"task5-{prefix}-{suffix}"
+    return f"task5-{prefix}-{suffix}-{run_nonce}"
 
 
 def _generate_candidate(root: Path, fixture: Path, output: Path) -> dict:
@@ -394,14 +455,26 @@ def _capture_layout_and_screenshots(
     page_name: str,
     url: str,
     screenshot_dir: Path,
+    run_nonce: str,
+    cleanup: list[dict],
     *,
     boundaries: bool,
 ) -> tuple[dict, dict]:
-    session = _session(f"{page_name}-layout", root)
+    session = _session(f"{page_name}-layout", root, run_nonce)
     cli.open(session)
     try:
         cli.attach_events(session)
         cli.run(session, "goto", url)
+        favicon_probe = None
+        if page_name == "reference":
+            favicon_probe = cli.value(
+                session,
+                """async page => page.evaluate(async () => {
+                  const url = new URL('/favicon.ico', location.origin).href;
+                  const response = await fetch(url);
+                  return {documentUrl: location.href, iconLinks: [...document.querySelectorAll('link[rel~="icon"]')].map(link => link.href), url: response.url, status: response.status};
+                })""",
+            )
         measurements = {}
         screenshot_hashes = {}
         for label, (width, height) in VIEWPORTS.items():
@@ -431,11 +504,12 @@ def _capture_layout_and_screenshots(
                 "viewports": measurements,
                 "boundaries": boundary_measurements,
                 "screenshots": screenshot_hashes,
+                **({"faviconProbe": favicon_probe} if favicon_probe else {}),
             },
             cli.events(session),
         )
     finally:
-        cli.close(session)
+        cleanup.append(cli.close(session, f"{page_name}-layout"))
 
 
 def _focus_state(cli: PlaywrightCLI, session: str) -> dict:
@@ -478,13 +552,17 @@ def _run_interactions(
     root: Path,
     candidate_url: str,
     collision_url: str,
+    run_nonce: str,
+    cleanup: list[dict],
 ) -> tuple[dict, dict, dict]:
-    session = _session("interactions", root)
+    session = _session("interactions", root, run_nonce)
     cli.open(session)
     try:
         cli.attach_events(session)
         cli.run(session, "resize", "1440", "1000")
         cli.run(session, "goto", candidate_url)
+        origin = f"{urlsplit(candidate_url).scheme}://{urlsplit(candidate_url).netloc}"
+        cli.value(session, f"async page => {{ await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {{origin: {json.dumps(origin)}}}); return true; }}")
 
         cli.run(session, "press", "Tab")
         skip_before = _focus_state(cli, session)
@@ -496,6 +574,7 @@ def _run_interactions(
               return {
                 hash: location.hash,
                 targetId: main.id,
+                activeElementId: document.activeElement?.id || null,
                 targetTop: main.getBoundingClientRect().top,
                 targetVisible: main.getBoundingClientRect().top < innerHeight
               };
@@ -565,14 +644,16 @@ def _run_interactions(
             session,
             """async page => {
               await page.waitForTimeout(150);
-              return page.evaluate(() => {
+              return page.evaluate(async () => {
                 const status = document.querySelector('.copy-status');
                 const code = document.querySelector('.codebox code');
                 return {
                   announcement: status.textContent,
                   ariaLive: status.getAttribute('aria-live'),
                   sourceText: code.textContent,
-                  buttonLabel: document.querySelector('.copy').getAttribute('aria-label')
+                  buttonLabel: document.querySelector('.copy').getAttribute('aria-label'),
+                  clipboardText: await navigator.clipboard.readText(),
+                  clipboardPermissions: {origin: location.origin, granted: true}
                 };
               });
             }""",
@@ -680,15 +761,17 @@ def _run_interactions(
         }
         return interaction, accessibility, cli.events(session)
     finally:
-        cli.close(session)
+        cleanup.append(cli.close(session, "interactions"))
 
 
 def _run_offline(
     cli: PlaywrightCLI,
     root: Path,
     candidate_path: Path,
+    run_nonce: str,
+    cleanup: list[dict],
 ) -> tuple[dict, dict]:
-    session = _session("offline", root)
+    session = _session("offline", root, run_nonce)
     cli.open(session)
     try:
         cli.attach_events(session)
@@ -715,7 +798,7 @@ def _run_offline(
         cli.run(session, "network-state-set", "online")
         return result, cli.events(session)
     finally:
-        cli.close(session)
+        cleanup.append(cli.close(session, "offline"))
 
 
 def _run_print(
@@ -723,8 +806,10 @@ def _run_print(
     root: Path,
     collision_url: str,
     pdf_path: Path,
+    run_nonce: str,
+    cleanup: list[dict],
 ) -> tuple[dict, dict]:
-    session = _session("print", root)
+    session = _session("print", root, run_nonce)
     cli.open(session)
     try:
         cli.attach_events(session)
@@ -764,26 +849,13 @@ def _run_print(
         pdf_result = cli.value(
             session,
             f"""async page => {{
-              await page.pdf({{
-                path: {json.dumps(str(pdf_path))},
-                format: 'A4',
-                printBackground: true,
-                margin: {{top: '12mm', right: '12mm', bottom: '12mm', left: '12mm'}}
-              }});
+              await page.pdf({json.dumps({**PDF_SETTINGS, "path": str(pdf_path)})});
               return true;
             }}""",
         )
         result = {
-            "settings": {
-                "format": "A4",
-                "printBackground": True,
-                "margins": {
-                    "top": "12mm",
-                    "right": "12mm",
-                    "bottom": "12mm",
-                    "left": "12mm",
-                },
-            },
+            "settings": copy.deepcopy(PDF_SETTINGS),
+            "pageBox": _inspect_pdf_page_box(pdf_path),
             "screen_hidden_cards_after_filter": screen_hidden_cards,
             "print_media": print_state,
             "pdf_created": pdf_result,
@@ -793,7 +865,7 @@ def _run_print(
         }
         return result, cli.events(session)
     finally:
-        cli.close(session)
+        cleanup.append(cli.close(session, "print"))
 
 
 def _approximately(actual: float, expected: float, tolerance: float) -> bool:
@@ -831,6 +903,8 @@ def _hard_checks(
     ):
         actual = console["counts"][key]
         add(label, actual == 0, actual, 0)
+    add("reference approved defects only", layout["known_reference_defects"]["approved"], layout["known_reference_defects"], "only 390 overflow and verified /favicon.ico 404")
+    add("browser session cleanup", all(item["closed"] for item in console["cleanup"]), console["cleanup"], "all sessions closed")
     add(
         "390 candidate scroll width",
         candidate["390"]["document"]["scrollWidth"] <= 390,
@@ -958,9 +1032,10 @@ def _hard_checks(
     add(
         "skip link Enter targets main",
         skip["after"]["hash"] == "#vn-owned-main"
-        and skip["after"]["targetVisible"],
+        and skip["after"]["targetVisible"]
+        and skip["after"]["activeElementId"] == "vn-owned-main",
         skip["after"],
-        "#vn-owned-main visible",
+        "#vn-owned-main visible and focused",
     )
     add(
         "all nav anchors resolve",
@@ -1026,11 +1101,9 @@ def _hard_checks(
     copy_result = interactions["copy"]
     add(
         "copy live announcement",
-        copy_result["announcement"] == "已复制"
-        and copy_result["ariaLive"] == "polite"
-        and bool(copy_result["sourceText"]),
+        _copy_matches_source(copy_result),
         copy_result,
-        "non-empty copied text and 已复制 polite announcement",
+        "clipboard exactly matches source text and 已复制 polite announcement",
     )
 
     semantics = accessibility["semantics"]
@@ -1144,6 +1217,8 @@ def _hard_checks(
         print_result["bytes"],
         "> 1000 bytes",
     )
+    add("canonical PDF settings", print_result["settings"] == PDF_SETTINGS, print_result["settings"], PDF_SETTINGS)
+    add("A4 PDF page box", print_result["pageBox"].get("ok") and _pdf_page_box_is_a4(print_result["pageBox"]), print_result["pageBox"], {"points": PDF_A4_POINTS, "tolerance": PDF_A4_TOLERANCE_POINTS})
     return checks
 
 
@@ -1192,6 +1267,14 @@ def _visual_review(root: Path, layout: dict, checks: list[dict]) -> str:
         )
     lines.extend(
         [
+            "",
+            "## Global style checks",
+            "",
+            "| Check names | Tolerance | Result |",
+            "|---|---|---|",
+            f"| {', '.join(check['name'] for check in checks if check['name'].startswith('color token '))} | exact tokens | {'PASS' if all(check['passed'] for check in checks if check['name'].startswith('color token ')) else 'FAIL'} |",
+            f"| hero radius; section radius | exact 28px / 18px | {'PASS' if all(check['passed'] for check in checks if check['name'] in {'hero radius', 'section radius'}) else 'FAIL'} |",
+            f"| {', '.join(check['name'] for check in checks if check['name'].startswith('section padding '))} | 26px +/- 2px | {'PASS' if all(check['passed'] for check in checks if check['name'].startswith('section padding ')) else 'FAIL'} |",
             "",
             "Reference screenshots: `reference/{1440,1024,768,390}.png`.",
             "",
@@ -1245,6 +1328,8 @@ def main(argv: list[str] | None = None) -> int:
         (screenshots / page_name).mkdir(parents=True, exist_ok=True)
 
     print("[setup] generating candidate through renderer CLI", flush=True)
+    run_nonce = secrets.token_hex(6)
+    cleanup: list[dict] = []
     generation = _generate_candidate(root, fixture, candidate)
     fixture_note = json.loads(fixture.read_text(encoding="utf-8"))
 
@@ -1302,6 +1387,8 @@ def main(argv: list[str] | None = None) -> int:
                         "candidate",
                         candidate_url,
                         screenshots / "candidate",
+                        run_nonce,
+                        cleanup,
                         boundaries=True,
                     )
                 )
@@ -1313,18 +1400,20 @@ def main(argv: list[str] | None = None) -> int:
                         "reference",
                         reference_url,
                         screenshots / "reference",
+                        run_nonce,
+                        cleanup,
                         boundaries=False,
                     )
                 )
                 print("[browser] exercising interactions and accessibility", flush=True)
                 interactions, accessibility, interaction_events = _run_interactions(
-                    cli, root, candidate_url, collision_url
+                    cli, root, candidate_url, collision_url, run_nonce, cleanup
                 )
                 print("[browser] verifying offline file reload", flush=True)
-                offline, offline_events = _run_offline(cli, root, candidate)
+                offline, offline_events = _run_offline(cli, root, candidate, run_nonce, cleanup)
                 print("[browser] verifying print media and PDF", flush=True)
                 print_result, print_events = _run_print(
-                    cli, root, collision_url, pdf_path
+                    cli, root, collision_url, pdf_path, run_nonce, cleanup
                 )
 
                 layout = {
@@ -1355,29 +1444,15 @@ def main(argv: list[str] | None = None) -> int:
                     },
                     "candidate": candidate_layout,
                     "reference": reference_layout,
-                    "known_reference_defects": {
-                        "390_horizontal_overflow": {
-                            "approved": True,
-                            "scroll_width": reference_layout["viewports"]["390"][
-                                "document"
-                            ]["scrollWidth"],
-                            "client_width": reference_layout["viewports"]["390"][
-                                "document"
-                            ]["clientWidth"],
-                        },
-                        "missing_favicon": {
-                            "approved": True,
-                            "http_errors": reference_events["httpErrors"],
-                            "console_errors": reference_events["consoleErrors"],
-                        },
-                    },
                 }
+                layout["known_reference_defects"] = _reference_defect_status(reference_layout, reference_events)
                 console = {
                     "candidate_layout": candidate_events,
                     "reference_layout": reference_events,
                     "candidate_interactions": interaction_events,
                     "candidate_offline": offline_events,
                     "candidate_print": print_events,
+                    "cleanup": cleanup,
                     "counts": {
                         **aggregate_candidate_events(
                             (

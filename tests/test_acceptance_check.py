@@ -10,7 +10,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from acceptance_check import (
     COLOR_TOKENS,
+    PDF_SETTINGS,
     PINNED_PLAYWRIGHT_COMMAND,
+    _copy_matches_source,
+    _pdf_page_box_is_a4,
+    _reference_defect_status,
+    _session,
+    _visual_review,
     add_all_category_collision,
     aggregate_candidate_events,
     failed_hard_checks,
@@ -169,6 +175,92 @@ def test_sha256_path_hashes_file_bytes(tmp_path):
     )
 
 
+def test_sessions_include_a_unique_run_nonce():
+    root = Path("/tmp/task-5")
+
+    assert _session("interactions", root, "first") != _session(
+        "interactions", root, "second"
+    )
+
+
+def test_copy_hard_gate_requires_clipboard_text_to_match_source():
+    assert _copy_matches_source(
+        {"announcement": "已复制", "ariaLive": "polite", "sourceText": "print(1)", "clipboardText": "print(1)"}
+    )
+    assert not _copy_matches_source(
+        {"announcement": "已复制", "ariaLive": "polite", "sourceText": "print(1)", "clipboardText": "other"}
+    )
+
+
+def test_pdf_settings_and_page_box_require_a4():
+    assert PDF_SETTINGS == {
+        "format": "A4",
+        "printBackground": True,
+        "margins": {"top": "12mm", "right": "12mm", "bottom": "12mm", "left": "12mm"},
+    }
+    assert _pdf_page_box_is_a4(
+        {"pageCount": 4, "mediaBox": [0.0, 0.0, 595.92, 842.88]}
+    )
+    assert not _pdf_page_box_is_a4(
+        {"pageCount": 4, "mediaBox": [0.0, 0.0, 612.0, 792.0]}
+    )
+
+
+def test_reference_defects_require_the_exact_favicon_probe_and_no_extra_errors():
+    reference = {
+        "viewports": {"390": {"document": {"scrollWidth": 394, "clientWidth": 390}}},
+        "faviconProbe": {
+            "documentUrl": "http://127.0.0.1:4567/reference.html",
+            "iconLinks": [],
+            "url": "http://127.0.0.1:4567/favicon.ico",
+            "status": 404,
+        },
+    }
+    events = {
+        "consoleErrors": [{"text": "Failed to load resource: the server responded with a status of 404 (File not found)", "url": "http://127.0.0.1:4567/favicon.ico"}],
+        "pageErrors": [],
+        "requestFailures": [],
+        "httpErrors": [{"status": 404, "url": "http://127.0.0.1:4567/favicon.ico"}],
+        "requests": [],
+    }
+
+    status = _reference_defect_status(reference, events)
+
+    assert status["approved"]
+    assert status["favicon"]["url"] == "http://127.0.0.1:4567/favicon.ico"
+    events["pageErrors"].append("unexpected")
+    assert not _reference_defect_status(reference, events)["approved"]
+
+
+def test_visual_review_binds_global_style_tolerances_to_check_names():
+    base = {
+        "shell": {"width": 1280},
+        "nav": {"width": 250},
+        "featureGrid": {"columnCount": 3},
+        "document": {"scrollWidth": 1280},
+    }
+    layout = {
+        "candidate": {"viewports": {label: copy.deepcopy(base) for label in ("1440", "1024", "768", "390")}},
+        "reference": {"viewports": {label: copy.deepcopy(base) for label in ("1440", "1024", "768", "390")}},
+    }
+    checks = [
+        {"name": "hero radius", "passed": True, "actual": "28px", "expected": "28px"},
+        {"name": "section radius", "passed": True, "actual": "18px", "expected": "18px"},
+        *[
+            {"name": f"section padding {side}", "passed": True, "actual": 26, "expected": "26 +/- 2px"}
+            for side in ("top", "right", "bottom", "left")
+        ],
+        {"name": "color token --bg", "passed": True, "actual": "#f6f7fb", "expected": "#f6f7fb"},
+    ]
+
+    review = _visual_review(Path("/tmp"), layout, checks)
+
+    assert "Global style checks" in review
+    assert "hero radius" in review
+    assert "section padding top" in review
+    assert "color token --bg" in review
+
+
 def test_main_returns_nonzero_when_a_candidate_hard_gate_fails(tmp_path, monkeypatch):
     import acceptance_check
 
@@ -222,6 +314,7 @@ def test_main_returns_nonzero_when_a_candidate_hard_gate_fails(tmp_path, monkeyp
     monkeypatch.setattr(acceptance_check, "_run_interactions", lambda *_args: ({}, {}, events))
     monkeypatch.setattr(acceptance_check, "_run_offline", lambda *_args: ({}, events))
     monkeypatch.setattr(acceptance_check, "_run_print", lambda *_args: ({}, events))
+    monkeypatch.setattr(acceptance_check, "_reference_defect_status", lambda *_args: {"approved": True})
     monkeypatch.setattr(
         acceptance_check,
         "_hard_checks",

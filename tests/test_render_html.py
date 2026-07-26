@@ -96,7 +96,7 @@ def test_web_profile_has_landmarks_skip_link_favicon_and_status_cards():
     )
     assert '<div class="shell">' in document
     assert '<nav aria-label="视频笔记目录">' in document
-    assert '<main id="vn-owned-main">' in document
+    assert '<main id="vn-owned-main" tabindex="-1">' in document
     assert document.count("<h1>") == 1
     assert '<span class="badge">bilibili · BV1Full</span>' in document
     assert '<p class="lead">A complete summary.</p>' in document
