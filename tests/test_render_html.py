@@ -259,6 +259,20 @@ def test_focus_overflow_media_and_print_rules_are_present():
     assert ".feature-card[hidden]{display:block!important}" in css
 
 
+def test_web_renders_media_timestamp_in_reader_facing_time_format():
+    note = fixture("all-blocks.json")
+    media = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "media"
+    )
+    media["timestamp_seconds"] = 9876.5
+
+    document = render_video_note(note, base_dir=FIXTURES)
+
+    assert '<p class="media-timestamp">时间点：02:44:36.5</p>' in document
+
+
 def test_javascript_updates_aria_hidden_and_live_copy_status():
     document = render_video_note(fixture("all-blocks.json"), base_dir=FIXTURES)
     for source in (

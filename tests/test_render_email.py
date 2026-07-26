@@ -401,6 +401,28 @@ def test_email_preserves_every_block_and_media_mime_with_nonempty_alt():
         assert f"data:{mime};base64," in render_email(fixture(name))
 
 
+def test_email_preserves_media_timestamp_and_isolated_flow_nodes():
+    note = fixture("all-blocks.json")
+    media = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "media"
+    )
+    media["timestamp_seconds"] = 9876.5
+    flow = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "flow"
+    )
+    flow["nodes"].append({"id": "isolated", "label": "ISOLATED-NODE-UNIQUE"})
+
+    document = render_email(note)
+
+    assert "时间点：02:44:36.5" in document
+    assert document.count("ISOLATED-NODE-UNIQUE") == 1
+    assert static_email_violations(document) == []
+
+
 def test_email_renders_every_media_field_and_data_uri_exactly_once_in_order():
     note = fixture("all-blocks.json")
     blocks = note["sections"][0]["blocks"]

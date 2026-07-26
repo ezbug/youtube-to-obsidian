@@ -354,6 +354,40 @@ def test_legacy_document_maps_exactly_and_discards_quote(tmp_path):
     assert "这句话必须被丢弃" not in rendered
 
 
+def test_legacy_document_discards_builder_only_evidence_fields(tmp_path):
+    image = tmp_path / "frame.jpg"
+    image.write_bytes((FIXTURES / "media" / "frame.jpg").read_bytes())
+    rendered = render_document(
+        {"title": "兼容调用", "bvid": "BV1Builder", "duration": 12, "author": "作者"},
+        [
+            {
+                "title": "章节",
+                "summary": "摘要",
+                "cards": [
+                    {
+                        "image": image,
+                        "label": "00:12",
+                        "analysis": "面向读者的解释",
+                        "chapter": "章节",
+                        "tool": "工具",
+                        "quote": "RAW-SUBTITLE-UNIQUE",
+                        "ocr": "RAW-OCR-UNIQUE",
+                        "vision_raw": "RAW-VISION-UNIQUE",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert "面向读者的解释" in rendered
+    for forbidden in (
+        "RAW-SUBTITLE-UNIQUE",
+        "RAW-OCR-UNIQUE",
+        "RAW-VISION-UNIQUE",
+    ):
+        assert forbidden not in rendered
+
+
 @pytest.mark.parametrize("path_kind", ["relative", "absolute"])
 def test_render_document_supports_legacy_relative_and_absolute_media(
     tmp_path, monkeypatch, path_kind
@@ -412,6 +446,45 @@ def test_evidence_sentinels_are_rejected_case_insensitively_when_embedded(sentin
     note = fixture("minimal.json")
     note["sections"][0]["blocks"][0]["text"] = f"prefix {sentinel} suffix"
     with pytest.raises(ValueError, match="sentinel"):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+@pytest.mark.parametrize("field", ["timestamp_alignment", "extraction_trace"])
+def test_exact_forbidden_evidence_fields_cannot_hide_in_dynamic_tables(field):
+    note = fixture("minimal.json")
+    note["sections"][0]["blocks"] = [
+        {
+            "id": "evidence-table",
+            "type": "table",
+            "columns": [{"id": field, "label": "证据"}],
+            "rows": [{field: "EVIDENCE-BOUNDARY-UNIQUE"}],
+        }
+    ]
+
+    with pytest.raises(ValueError, match=field):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+@pytest.mark.parametrize("duration", [float("nan"), float("inf"), 10**1000])
+def test_duration_must_be_finite_and_renderable(duration):
+    note = fixture("minimal.json")
+    note["meta"]["duration_seconds"] = duration
+
+    with pytest.raises(ValueError, match="finite non-negative"):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+@pytest.mark.parametrize("timestamp", [float("nan"), float("inf"), 10**1000])
+def test_media_timestamp_must_be_finite_and_renderable(timestamp):
+    note = fixture("all-blocks.json")
+    media = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "media"
+    )
+    media["timestamp_seconds"] = timestamp
+
+    with pytest.raises(ValueError, match="finite non-negative"):
         normalize_video_note(note, base_dir=FIXTURES)
 
 

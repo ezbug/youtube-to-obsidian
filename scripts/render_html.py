@@ -6,6 +6,7 @@ import argparse
 import base64
 import html
 import json
+import math
 import os
 import sys
 import tempfile
@@ -23,6 +24,8 @@ _FORBIDDEN_KEY_PARTS = (
     "ocr",
     "html",
     "svg",
+    "timestamp_alignment",
+    "extraction_trace",
 )
 _SENTINELS = ("evidence_sentinel", "evidence_leak_sentinel_9f2a")
 _IMAGE_FORMATS = {
@@ -38,7 +41,16 @@ _IMAGE_SUFFIXES = {
 
 def stable_json_dumps(note: dict) -> str:
     """Return canonical JSON suitable for byte-for-byte fixture comparison."""
-    return json.dumps(note, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    return (
+        json.dumps(
+            note,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    )
 
 
 def _fail(message: str) -> None:
@@ -95,6 +107,18 @@ def _list(value, name: str) -> list:
 def _text(value, name: str, *, allow_empty: bool = False) -> str:
     if not isinstance(value, str) or (not allow_empty and not value.strip()):
         _fail(f"{name} must be a non-empty string")
+    return value
+
+
+def _non_negative_number(value, name: str):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _fail(f"{name} must be a finite non-negative number")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite or value < 0:
+        _fail(f"{name} must be a finite non-negative number")
     return value
 
 
@@ -317,8 +341,10 @@ def _normalize_block(
             {"id", "type", "image", "alt", "headline", "explanation", "usage", "timestamp_seconds", "deep_link"},
         )
         timestamp = block.get("timestamp_seconds")
-        if timestamp is not None and (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp < 0):
-            _fail(f"{block_path}.timestamp_seconds must be non-negative")
+        if timestamp is not None:
+            timestamp = _non_negative_number(
+                timestamp, f"{block_path}.timestamp_seconds"
+            )
         deep_link = block.get("deep_link")
         return {
             "id": block_id,
@@ -496,9 +522,9 @@ def normalize_video_note(note: dict, *, base_dir: str | Path | None = None) -> d
         _fail(f"note.schema_version must be {SCHEMA_VERSION}")
     meta = _object(note["meta"], "note.meta")
     _keys(meta, "note.meta", {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"}, {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"})
-    duration = meta["duration_seconds"]
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
-        _fail("note.meta.duration_seconds must be non-negative")
+    duration = _non_negative_number(
+        meta["duration_seconds"], "note.meta.duration_seconds"
+    )
     normalized_meta = {
         "platform": _text(meta["platform"], "note.meta.platform"),
         "source_id": _text(meta["source_id"], "note.meta.source_id"),
@@ -599,7 +625,21 @@ def normalize_legacy_document(meta: dict, sections: list) -> dict:
             })
         for card_index, card in enumerate(legacy_section.get("cards", []), start=1):
             card = _object(card, "legacy card")
-            _keys(card, "legacy card", {"image", "label", "analysis"}, {"image", "label", "analysis", "quote"})
+            _keys(
+                card,
+                "legacy card",
+                {"image", "label", "analysis"},
+                {
+                    "image",
+                    "label",
+                    "analysis",
+                    "quote",
+                    "chapter",
+                    "tool",
+                    "ocr",
+                    "vision_raw",
+                },
+            )
             label = _text(card["label"], "legacy card.label")
             blocks.append({
                 "id": f"{section_id}-media-{card_index}",
@@ -698,6 +738,7 @@ th{background:#fafafe}
 .card-copy{padding:16px}
 .media-headline{margin:0 0 6px}
 .media-explanation,.usage{margin:6px 0}
+.media-timestamp{margin:7px 0 0;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 .feature-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
 .filter-btn{border:1px solid var(--border);background:#fff;color:var(--text);padding:8px 11px;border-radius:10px;cursor:pointer}
 .filter-btn.active,.filter-btn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -811,6 +852,19 @@ def _attribute(value) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _timestamp_label(seconds) -> str:
+    whole_seconds = int(seconds)
+    fraction = seconds - whole_seconds
+    hours, remainder = divmod(whole_seconds, 3600)
+    minutes, second = divmod(remainder, 60)
+    second_text = f"{second:02d}"
+    if fraction:
+        second_text += f"{fraction:.3f}"[1:].rstrip("0")
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{second_text}"
+    return f"{minutes:02d}:{second_text}"
+
+
 def _id_token(source_id: str) -> str:
     encoded = base64.urlsafe_b64encode(source_id.encode("utf-8")).decode("ascii")
     return encoded.rstrip("=")
@@ -859,6 +913,12 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
             f"<tbody>{rows}</tbody></table></div>"
         )
     if kind == "media":
+        timestamp = (
+            f'<p class="media-timestamp">时间点：'
+            f'{html.escape(_timestamp_label(block["timestamp_seconds"]))}</p>'
+            if block["timestamp_seconds"] is not None
+            else ""
+        )
         usage = (
             f'<p class="usage">{html.escape(block["usage"])}</p>'
             if block["usage"]
@@ -877,7 +937,7 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
             '<div class="card-copy">'
             f'<h3 class="media-headline">{html.escape(block["headline"])}</h3>'
             f'<p class="media-explanation">{html.escape(block["explanation"])}</p>'
-            f"{usage}{deep_link}</div></article>"
+            f"{timestamp}{usage}{deep_link}</div></article>"
         )
     if kind == "feature_grid":
         categories = list(dict.fromkeys(card["category"] for card in block["cards"]))
@@ -1060,6 +1120,12 @@ def _render_email_block(block: dict, base_dir: Path | None) -> str:
             f"<thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
         )
     if kind == "media":
+        timestamp = (
+            f'<p style="{text_style}margin:7px 0 0;color:#667085;font-size:13px;">'
+            f'时间点：{html.escape(_timestamp_label(block["timestamp_seconds"]))}</p>'
+            if block["timestamp_seconds"] is not None
+            else ""
+        )
         usage = (
             f'<p style="{text_style}margin:8px 0;color:#667085;">{html.escape(block["usage"])}</p>'
             if block["usage"]
@@ -1077,7 +1143,7 @@ def _render_email_block(block: dict, base_dir: Path | None) -> str:
             f'<tr><td><img src="{_image_uri(block["image"], base_dir)}" alt="{_attribute(block["alt"])}" '
             'style="display:block;width:100%;max-width:100%;height:auto;background:#111827;"></td></tr>'
             f'<tr><td style="padding:16px;"><h3 style="{text_style}margin:0 0 8px;font-size:19px;">{html.escape(block["headline"])}</h3>'
-            f'<p style="{text_style}margin:0;color:#667085;">{html.escape(block["explanation"])}</p>{usage}{deep_link}</td></tr></table>'
+            f'<p style="{text_style}margin:0;color:#667085;">{html.escape(block["explanation"])}</p>{timestamp}{usage}{deep_link}</td></tr></table>'
         )
     if kind == "feature_grid":
         categories = list(dict.fromkeys(card["category"] for card in block["cards"]))
@@ -1109,15 +1175,24 @@ def _render_email_block(block: dict, base_dir: Path | None) -> str:
         )
     if kind == "flow":
         labels = {node["id"]: node["label"] for node in block["nodes"]}
-        items = (
-            [
+        if block["edges"]:
+            items = [
                 f"{labels[edge['from']]} → {labels[edge['to']]}"
                 + (f": {edge['label']}" if edge["label"] else "")
                 for edge in block["edges"]
             ]
-            if block["edges"]
-            else [node["label"] for node in block["nodes"]]
-        )
+            connected = {
+                endpoint
+                for edge in block["edges"]
+                for endpoint in (edge["from"], edge["to"])
+            }
+            items.extend(
+                node["label"]
+                for node in block["nodes"]
+                if node["id"] not in connected
+            )
+        else:
+            items = [node["label"] for node in block["nodes"]]
         return (
             f'<ol id="{block_id}" style="{text_style}margin:16px 0;padding-left:24px;">'
             + "".join(f"<li style=\"margin:6px 0;\">{html.escape(item)}</li>" for item in items)
