@@ -259,18 +259,27 @@ def test_focus_overflow_media_and_print_rules_are_present():
     assert ".feature-card[hidden]{display:block!important}" in css
 
 
-def test_web_renders_media_timestamp_in_reader_facing_time_format():
+@pytest.mark.parametrize(
+    ("seconds", "label"),
+    [
+        (0.0004, "00:00"),
+        (59.9999, "01:00"),
+        (3599.9999, "01:00:00"),
+        (9876.5, "02:44:36.5"),
+    ],
+)
+def test_web_renders_media_timestamp_in_reader_facing_time_format(seconds, label):
     note = fixture("all-blocks.json")
     media = next(
         block
         for block in note["sections"][0]["blocks"]
         if block["type"] == "media"
     )
-    media["timestamp_seconds"] = 9876.5
+    media["timestamp_seconds"] = seconds
 
     document = render_video_note(note, base_dir=FIXTURES)
 
-    assert '<p class="media-timestamp">时间点：02:44:36.5</p>' in document
+    assert f'<p class="media-timestamp">时间点：{label}</p>' in document
 
 
 def test_javascript_updates_aria_hidden_and_live_copy_status():

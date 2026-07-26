@@ -854,12 +854,15 @@ def _attribute(value) -> str:
 
 def _timestamp_label(seconds) -> str:
     whole_seconds = int(seconds)
-    fraction = seconds - whole_seconds
+    milliseconds = round((seconds - whole_seconds) * 1000)
+    if milliseconds == 1000:
+        whole_seconds += 1
+        milliseconds = 0
     hours, remainder = divmod(whole_seconds, 3600)
     minutes, second = divmod(remainder, 60)
     second_text = f"{second:02d}"
-    if fraction:
-        second_text += f"{fraction:.3f}"[1:].rstrip("0")
+    if milliseconds:
+        second_text += "." + f"{milliseconds:03d}".rstrip("0")
     if hours:
         return f"{hours:02d}:{minutes:02d}:{second_text}"
     return f"{minutes:02d}:{second_text}"
