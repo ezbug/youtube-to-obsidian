@@ -34,6 +34,14 @@ def test_schema_declares_the_v2_contract_and_strict_objects():
     assert schema["$defs"]["meta"]["properties"]["source_url"]["pattern"] == http_pattern
     assert schema["$defs"]["media"]["properties"]["deep_link"]["pattern"] == http_pattern
     assert schema["$defs"]["feature_card"]["properties"]["link"]["pattern"] == http_pattern
+    accordion_children = schema["$defs"]["accordion"]["properties"]["blocks"]["items"][
+        "oneOf"
+    ]
+    assert {child["$ref"] for child in accordion_children} == {
+        "#/$defs/paragraph",
+        "#/$defs/list",
+        "#/$defs/callout",
+    }
 
     def assert_strict(node):
         if isinstance(node, dict):
@@ -246,6 +254,35 @@ def test_ids_are_globally_unique_including_nested_blocks():
     )
     accordion["blocks"][0]["id"] = note["sections"][0]["blocks"][0]["id"]
     with pytest.raises(ValueError, match="unique"):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_nested_accordion_is_rejected_by_the_one_level_contract():
+    note = fixture("all-blocks.json")
+    accordion = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "accordion"
+    )
+    accordion["blocks"].append(
+        {
+            "id": "nested-accordion",
+            "type": "accordion",
+            "title": "Nested accordion",
+            "blocks": [
+                {
+                    "id": "nested-accordion-text",
+                    "type": "paragraph",
+                    "text": "Nested content",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="must be paragraph, list, or callout inside an accordion",
+    ):
         normalize_video_note(note, base_dir=FIXTURES)
 
 
