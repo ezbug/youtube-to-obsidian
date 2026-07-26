@@ -29,6 +29,10 @@ def test_schema_declares_the_v2_contract_and_strict_objects():
     )
     assert schema["$id"] == "https://video-note.dev/schema/video-note-v2.schema.json"
     assert schema["properties"]["schema_version"]["const"] == "video-note/v2"
+    http_pattern = "^[Hh][Tt][Tt][Pp][Ss]?://"
+    assert schema["$defs"]["meta"]["properties"]["source_url"]["pattern"] == http_pattern
+    assert schema["$defs"]["media"]["properties"]["deep_link"]["pattern"] == http_pattern
+    assert schema["$defs"]["feature_card"]["properties"]["link"]["pattern"] == http_pattern
 
     def assert_strict(node):
         if isinstance(node, dict):
@@ -47,14 +51,15 @@ def test_schema_declares_the_v2_contract_and_strict_objects():
     "name", ["minimal.json", "full.json", "all-blocks.json", "jpeg.json", "png.json", "webp.json"]
 )
 def test_valid_fixtures_normalize_to_stable_json(name):
-    normalized = normalize_video_note(fixture(name), base_dir=FIXTURES)
+    source = fixture(name)
+    normalized = normalize_video_note(source, base_dir=FIXTURES)
     serialized = stable_json_dumps(normalized)
     assert serialized.endswith("\n")
     assert serialized == stable_json_dumps(json.loads(serialized))
     assert normalized["schema_version"] == "video-note/v2"
-    assert [section["id"] for section in normalized["sections"]] == sorted(
-        section["id"] for section in normalized["sections"]
-    )
+    assert [section["id"] for section in normalized["sections"]] == [
+        section["id"] for section in source["sections"]
+    ]
 
 
 def test_normalization_applies_shared_defaults():
@@ -112,6 +117,50 @@ def test_only_http_and_https_user_links_are_allowed():
     note["sections"][0]["blocks"][1]["deep_link"] = "file:///private/frame.jpg"
     with pytest.raises(ValueError, match="HTTP"):
         normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_normalization_preserves_input_order_for_twelve_sections():
+    note = fixture("minimal.json")
+    note["sections"] = [
+        {
+            "id": f"section-{index}",
+            "title": f"Section {index}",
+            "summary": f"Summary {index}",
+            "blocks": [
+                {
+                    "id": f"section-{index}-text",
+                    "type": "paragraph",
+                    "text": f"Text {index}",
+                }
+            ],
+        }
+        for index in range(1, 13)
+    ]
+    normalized = normalize_video_note(note, base_dir=FIXTURES)
+    assert [section["id"] for section in normalized["sections"]] == [
+        f"section-{index}" for index in range(1, 13)
+    ]
+
+
+def test_explicit_base_rejects_absolute_v2_media_path():
+    note = fixture("full.json")
+    note["sections"][0]["blocks"][1]["image"] = str(
+        (FIXTURES / "media" / "frame.jpg").resolve()
+    )
+    with pytest.raises(ValueError, match="relative"):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_explicit_base_rejects_symlinked_v2_media_escape(tmp_path):
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    outside = tmp_path / "outside.jpg"
+    outside.write_bytes(b"\xff\xd8\xff\xd9")
+    (base_dir / "escape.jpg").symlink_to(outside)
+    note = fixture("full.json")
+    note["sections"][0]["blocks"][1]["image"] = "escape.jpg"
+    with pytest.raises(ValueError, match="escape"):
+        normalize_video_note(note, base_dir=base_dir)
 
 
 def test_ids_are_globally_unique_including_nested_blocks():
@@ -179,6 +228,62 @@ def test_legacy_document_maps_exactly_and_discards_quote(tmp_path):
         }],
     )
     assert "这句话必须被丢弃" not in rendered
+
+
+@pytest.mark.parametrize("path_kind", ["relative", "absolute"])
+def test_render_document_supports_legacy_relative_and_absolute_media(
+    tmp_path, monkeypatch, path_kind
+):
+    monkeypatch.chdir(tmp_path)
+    frame = Path("out/frames/frame.jpg")
+    frame.parent.mkdir(parents=True)
+    frame.write_bytes(b"\xff\xd8\xff\xd9")
+    image = frame if path_kind == "relative" else frame.resolve()
+    rendered = render_document(
+        {"title": "路径兼容", "bvid": "BV1Path", "duration": 1, "author": "作者"},
+        [
+            {
+                "title": "章节",
+                "summary": "摘要",
+                "cards": [
+                    {
+                        "image": image,
+                        "label": "00:01",
+                        "analysis": "路径测试",
+                    }
+                ],
+            }
+        ],
+    )
+    assert "data:image/jpeg;base64," in rendered
+
+
+def test_malformed_legacy_row_reports_its_section_and_row_index():
+    with pytest.raises(
+        ValueError,
+        match=r"legacy sections\[0\]\.rows\[1\] must contain exactly 3 values",
+    ):
+        normalize_legacy_document(
+            {"title": "坏表格", "bvid": "BV1Row", "duration": 1, "author": "作者"},
+            [
+                {
+                    "title": "章节",
+                    "summary": "摘要",
+                    "rows": [["正确", "用途", "要点"], ["缺少", "字段"]],
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "sentinel",
+    ["EVIDENCE_LEAK_SENTINEL_9F2A", "evidence_leak_sentinel_9f2a"],
+)
+def test_exact_evidence_leak_sentinel_is_rejected_case_insensitively(sentinel):
+    note = fixture("minimal.json")
+    note["sections"][0]["blocks"][0]["text"] = f"prefix {sentinel} suffix"
+    with pytest.raises(ValueError, match="sentinel"):
+        normalize_video_note(note, base_dir=FIXTURES)
 
 
 def test_legacy_mapping_ignores_unmapped_caller_metadata():

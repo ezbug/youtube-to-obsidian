@@ -20,7 +20,7 @@ _FORBIDDEN_KEY_PARTS = (
     "html",
     "svg",
 )
-_SENTINEL = "evidence_sentinel"
+_SENTINEL = "evidence_leak_sentinel_9f2a"
 _IMAGE_SUFFIXES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 
@@ -70,7 +70,7 @@ def _reject_evidence(value, path: str = "note") -> None:
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _reject_evidence(child, f"{path}[{index}]")
-    elif isinstance(value, str) and _SENTINEL in value.casefold().replace("-", "_"):
+    elif isinstance(value, str) and _SENTINEL in value.casefold():
         _fail(f"{path} contains the evidence sentinel")
 
 
@@ -87,11 +87,19 @@ def _image_path(value, base_dir: Path | None) -> str:
     path = Path(raw)
     if path.suffix.casefold() not in _IMAGE_SUFFIXES:
         _fail("media.image must be JPEG, PNG, or WebP")
-    if not path.is_absolute() and ".." in path.parts:
+    if base_dir is not None:
+        if path.is_absolute():
+            _fail("media.image must be relative when base_dir is provided")
+        base = base_dir.resolve()
+        candidate = (base / path).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            _fail(f"media.image escapes its base directory: {raw}")
+        if not candidate.is_file():
+            _fail(f"media.image does not exist: {raw}")
+    elif not path.is_absolute() and ".." in path.parts:
         _fail("media.image must stay within its base directory")
-    candidate = path if path.is_absolute() or base_dir is None else base_dir / path
-    if base_dir is not None and not candidate.is_file():
-        _fail(f"media.image does not exist: {raw}")
     return raw
 
 
@@ -296,7 +304,7 @@ def normalize_video_note(note: dict, *, base_dir: str | Path | None = None) -> d
         "schema_version": SCHEMA_VERSION,
         "meta": normalized_meta,
         "summary": _text(note["summary"], "summary"),
-        "sections": sorted(sections, key=lambda item: item["id"]),
+        "sections": sections,
     }
 
 
@@ -320,17 +328,28 @@ def normalize_legacy_document(meta: dict, sections: list) -> dict:
             "type": "paragraph",
             "text": _text(legacy_section["summary"], "legacy section.summary"),
         }]
-        rows = legacy_section.get("rows", [])
+        rows = _list(
+            legacy_section.get("rows", []),
+            f"legacy sections[{section_index - 1}].rows",
+        )
         if rows:
+            normalized_rows = []
+            for row_index, row in enumerate(rows):
+                if not isinstance(row, (list, tuple)) or len(row) != 3:
+                    _fail(
+                        f"legacy sections[{section_index - 1}].rows[{row_index}] "
+                        "must contain exactly 3 values"
+                    )
+                normalized_rows.append({
+                    "name": str(row[0]),
+                    "usage": str(row[1]),
+                    "points": str(row[2]),
+                })
             blocks.append({
                 "id": f"{section_id}-table",
                 "type": "table",
                 "columns": [{"id": "name", "label": "名称"}, {"id": "usage", "label": "用途"}, {"id": "points", "label": "要点"}],
-                "rows": [
-                    {"name": str(row[0]), "usage": str(row[1]), "points": str(row[2])}
-                    for row in rows
-                    if isinstance(row, (list, tuple)) and len(row) == 3
-                ],
+                "rows": normalized_rows,
             })
         for card_index, card in enumerate(legacy_section.get("cards", []), start=1):
             card = _object(card, "legacy card")
@@ -417,11 +436,4 @@ def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
 def render_document(meta: dict, sections: list) -> str:
     """Retain the legacy Bilibili caller API while rendering through v2."""
     normalized = normalize_legacy_document(meta, sections)
-    media_paths = [
-        block["image"]
-        for section in normalized["sections"]
-        for block in section["blocks"]
-        if block["type"] == "media"
-    ]
-    base_dir = None if not media_paths else Path(media_paths[0]).parent
-    return render_video_note(normalized, base_dir=base_dir)
+    return render_video_note(normalized)
