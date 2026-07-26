@@ -1,7 +1,7 @@
 [project]
 name = "youtube-to-obsidian"
-version = "0.1.0"
-description = "YouTube video-to-Obsidian workflow."
+version = "0.2.0"
+description = "YouTube video-note workflow with a verified offline HTML renderer."
 requires-python = ">=3.11"
 dependencies = [
   "yt-dlp>=2024.8,<2027",

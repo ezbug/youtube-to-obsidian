@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+archive-config.local.json
 credentials*
 .credentials*
 cookies*

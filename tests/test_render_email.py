@@ -39,6 +39,10 @@ _DATA_IMAGE_SOURCE = re.compile(
     r"\Adata:image/(?:jpeg|png|webp);base64,[a-z0-9+/]*={0,2}\Z",
     re.IGNORECASE,
 )
+_DATA_FAVICON_SOURCE = re.compile(
+    r"\Adata:image/svg\+xml;base64,[a-z0-9+/]*={0,2}\Z",
+    re.IGNORECASE,
+)
 _EVENT_ATTRIBUTE = re.compile(r"\Aon[a-z0-9_:-]+\Z", re.IGNORECASE)
 _CSS_VARIABLE = re.compile(
     r"(?:\A|;)\s*--[^:;]+\s*:",
@@ -124,9 +128,17 @@ class _StaticEmailAudit(HTMLParser):
             for name, value in attrs
         ]
         attr_map = dict(normalized_attrs)
+        embedded_favicon = (
+            tag == "link"
+            and "icon" in attr_map.get("rel", "").casefold().split()
+            and _DATA_FAVICON_SOURCE.fullmatch(
+                attr_map.get("href", "").strip()
+            )
+            is not None
+        )
         if tag in self.prohibited_tags:
             self.violations.append(f"prohibited-tag:{tag}")
-        if tag in self.resource_tags:
+        if tag in self.resource_tags and not embedded_favicon:
             self.violations.append(f"resource-tag:{tag}")
 
         for name, value in normalized_attrs:
@@ -154,8 +166,11 @@ class _StaticEmailAudit(HTMLParser):
             elif name == "href":
                 target = value.strip().casefold()
                 if not (
-                    tag == "a"
-                    and target.startswith(("#", "http://", "https://"))
+                    (
+                        tag == "a"
+                        and target.startswith(("#", "http://", "https://"))
+                    )
+                    or embedded_favicon
                 ):
                     self.violations.append(f"resource:{tag}[href]")
 
@@ -206,6 +221,7 @@ def test_email_is_static_inline_and_has_a_table_shell():
 
     assert static_email_violations(document) == []
     assert '<table role="presentation"' in document
+    assert '<link rel="icon" href="data:image/svg+xml;base64,' in document
     assert re.search(r"max-width\s*:\s*760px", document, re.I)
     assert "style=\"" in document
 
@@ -275,6 +291,7 @@ def test_static_email_audit_rejects_runtime_resource_variants(snippet, expected)
 def test_static_email_audit_allows_embedded_images_and_reader_links():
     snippet = (
         '<img src="data:image/webp;base64,AA==" alt="embedded">'
+        '<link rel="icon" href="data:image/svg+xml;base64,AA==">'
         '<a href="https://example.test/read">read</a>'
         '<a href="#section">section</a>'
     )

@@ -11,6 +11,37 @@ description: YouTube视频转Obsidian笔记工作流。核心字幕与笔记流�
 - Safari 仅可复用已有登录状态；不得输入密码、验证码或 2FA，且不得尝试读取 Safari cookie 数据库。
 - 发送邮件前先生成 HTML；邮件默认只保留草稿，只有用户明确要求并显式调用邮件脚本时才发送。
 
+## HTML 归档与代表性命名（最高优先级）
+
+每次视频笔记完成并通过浏览器验收后，必须把最终读者版 Web HTML 归档到调用者
+明确选择的目录。公开 Skill 不提供个人电脑默认路径；目录按以下优先级解析：
+
+1. `scripts/archive_html.py --archive-dir '<目录>'`
+2. 环境变量 `VIDEO_NOTE_ARCHIVE_DIR`
+3. `--config '<config.json>'` 或 `VIDEO_NOTE_CONFIG` 指向的 JSON 文件，其中包含
+   `{"archive_dir": "<目录>"}`
+4. 仓库根目录中由用户或 Agent 创建、且被 Git 忽略的
+   `archive-config.local.json`
+5. 都未提供时明确停止，请用户选择目录；Agent 也可在当前任务范围内显式设定
+   `--archive-dir`，但不得猜测个人 Vault 或主目录。
+
+归档前先根据整篇视频笔记提炼代表性标题，标题应同时表达主题和最重要的结论、
+方法或冲突，不得直接使用 `视频笔记.html`、视频 ID 或“某某总结”这类泛化名称。
+推荐 12–36 个中文字符。然后调用：
+
+```bash
+python3 scripts/archive_html.py \
+  --html '<已验收的 Web HTML>' \
+  --title '<代表性标题>' \
+  --source-id '<YouTube video ID>' \
+  --archive-dir '<用户或 Agent 选择的目录>'
+```
+
+归档器会清理不安全文件名字符、原子写入、验证字节一致性，并在同名内容不同时
+先追加视频 ID、再追加递增序号；绝不静默覆盖。静态 Email 版本只有用户明确
+要求时才用 `--profile email` 归档为 `<代表性标题>—Email.html`。PDF 只是打印
+验收证据，不能代替最终 HTML。
+
 ## 当前 HTML 渲染入口
 
 面向读者的 HTML 必须从 `video-note/v2` 生成；canonical schema 是

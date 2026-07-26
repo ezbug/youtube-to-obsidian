@@ -1,5 +1,6 @@
 vault: ""
 output_dir: ""
+archive_dir: ""
 cookies_file: ""
 email:
   enabled: false

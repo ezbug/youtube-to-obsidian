@@ -1235,6 +1235,7 @@ def _render_email_video_note(note: dict, *, base_dir: str | Path | None = None) 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
+<link rel="icon" href="data:image/svg+xml;base64,{_FAVICON}">
 </head>
 <body style="margin:0;background:#f6f7fb;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f6f7fb;border-collapse:collapse;">

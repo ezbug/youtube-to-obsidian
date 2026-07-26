@@ -51,6 +51,7 @@ jobs:
       - name: Reject machine-specific paths
         run: |
           ! rg -n --hidden \
+            -g '!.git' \
             -g '!**/.git/**' \
             -g '!**/.venv/**' \
             -g '!**/node_modules/**' \
