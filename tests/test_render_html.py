@@ -28,6 +28,10 @@ def compact_css(document):
     return re.sub(r"\s+", "", match.group(1))
 
 
+def emitted_ids(document):
+    return re.findall(r'\sid="([^"]+)"', document)
+
+
 def run_cli(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *map(str, args)],
@@ -88,19 +92,20 @@ def test_web_profile_has_landmarks_skip_link_favicon_and_status_cards():
     document = render_video_note(fixture("full.json"), base_dir=FIXTURES)
     assert '<link rel="icon" href="data:image/svg+xml;base64,' in document
     assert document.split("<body>", 1)[1].lstrip().startswith(
-        '<a class="skip-link" href="#main-content">'
+        '<a class="skip-link" href="#vn-owned-main">'
     )
     assert '<div class="shell">' in document
     assert '<nav aria-label="视频笔记目录">' in document
-    assert '<main id="main-content">' in document
+    assert '<main id="vn-owned-main">' in document
     assert document.count("<h1>") == 1
     assert '<span class="badge">bilibili · BV1Full</span>' in document
     assert '<p class="lead">A complete summary.</p>' in document
     assert document.count('class="status"') == 3
     assert "Author" in document
     assert "61 秒" in document
-    assert 'href="#full"' in document
-    assert '<section id="full"' in document
+    section_id = re.search(r'<section id="([^"]+)"', document).group(1)
+    assert section_id.startswith("vn-src-")
+    assert f'href="#{section_id}"' in document
 
 
 def test_all_blocks_have_semantics_and_renderer_owned_interactions():
@@ -125,9 +130,9 @@ def test_all_blocks_have_semantics_and_renderer_owned_interactions():
         'class="flow" aria-label="流程图：Start → End: next">',
         'class="accordion">',
         'aria-expanded="false"',
-        'aria-controls="alpha-accordion-panel"',
-        'id="alpha-accordion-panel"',
-        'aria-labelledby="alpha-accordion-toggle"',
+        'aria-controls="vn-owned-accordion-panel-',
+        'id="vn-owned-accordion-panel-',
+        'aria-labelledby="vn-owned-accordion-toggle-',
     )
     for fragment in expected:
         assert fragment in document
@@ -175,9 +180,44 @@ def test_all_user_text_and_section_ids_are_escaped():
     ):
         assert raw not in document
     assert "&lt;em&gt;section&lt;/em&gt;" in document
-    escaped_id = "unsafe&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"
-    assert f'id="{escaped_id}"' in document
-    assert f'href="#{escaped_id}"' in document
+    section_id = re.search(r'<section id="([^"]+)"', document).group(1)
+    assert section_id.startswith("vn-src-")
+    assert f'href="#{section_id}"' in document
+    assert "unsafe&quot;" not in section_id
+
+
+def test_dom_ids_use_disjoint_namespaces_and_resist_adversarial_collisions():
+    note = fixture("all-blocks.json")
+    first = note["sections"][0]
+    first["id"] = "alpha-code"
+    first["blocks"][0]["id"] = "main-content"
+    code = next(block for block in first["blocks"] if block["type"] == "code")
+    code["id"] = "alpha"
+    accordion = next(
+        block for block in first["blocks"] if block["type"] == "accordion"
+    )
+    accordion["id"] = "clash"
+    note["sections"][1]["id"] = "clash-panel"
+
+    document = render_video_note(note, base_dir=FIXTURES)
+    ids = emitted_ids(document)
+
+    assert ids
+    assert len(ids) == len(set(ids))
+    assert all(value.startswith(("vn-src-", "vn-owned-")) for value in ids)
+    source_ids = re.findall(r'<section id="([^"]+)"', document)
+    nav_targets = re.findall(r'<a href="#([^"]+)">', document)
+    assert source_ids == nav_targets[-len(source_ids):]
+    assert all(value.startswith("vn-src-") for value in source_ids)
+    assert 'id="main-content"' not in document
+    assert render_video_note(note, base_dir=FIXTURES) == document
+
+    referenced_ids = re.findall(
+        r'(?:aria-labelledby|aria-controls|data-copy-target|data-status-target)="([^"]+)"',
+        document,
+    )
+    referenced_ids.append(re.search(r'class="skip-link" href="#([^"]+)"', document).group(1))
+    assert set(referenced_ids) <= set(ids)
 
 
 def test_focus_overflow_media_and_print_rules_are_present():
@@ -191,6 +231,7 @@ def test_focus_overflow_media_and_print_rules_are_present():
     for selector in ("nav", ".feature-toolbar", ".copy", ".accordion-toggle"):
         assert selector in css
     assert "break-inside:avoid" in css
+    assert ".feature-card[hidden]{display:block!important}" in css
 
 
 def test_javascript_updates_aria_hidden_and_live_copy_status():
@@ -203,8 +244,56 @@ def test_javascript_updates_aria_hidden_and_live_copy_status():
         "navigator.clipboard.writeText",
         "textContent = '已复制'",
         "textContent = '复制失败，请手动复制'",
+        "data-filter-mode",
+        "const showAll",
+        "finally {",
+        "helper.remove();",
     ):
         assert source in document
+    assert "selected !== 'all'" not in document
+
+
+def test_filter_all_category_cannot_collide_with_renderer_all_control():
+    note = fixture("all-blocks.json")
+    grid = next(
+        block
+        for block in note["sections"][0]["blocks"]
+        if block["type"] == "feature_grid"
+    )
+    grid["cards"][0]["category"] = "all"
+
+    document = render_video_note(note, base_dir=FIXTURES)
+
+    assert document.count('data-filter-mode="all"') == 1
+    assert document.count('data-filter-mode="category"') == 1
+    assert document.count('data-filter="all"') == 1
+    assert 'class="feature-card" data-category="all"' in document
+    assert 'class="feature-card" data-category="all" hidden' not in document
+    assert "button.dataset.filterMode === 'all'" in document
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            b"\x89PNG\r\n\x1a\npayload",
+            'note.sections[0].blocks[1][id="full-media"].image signature '
+            "does not match JPEG: bad.jpg",
+        ),
+        (
+            b"not-an-image",
+            'note.sections[0].blocks[1][id="full-media"].image has unsupported '
+            "image signature: bad.jpg",
+        ),
+    ],
+)
+def test_media_signature_must_match_extension(tmp_path, payload, expected):
+    note = fixture("full.json")
+    note["sections"][0]["blocks"][1]["image"] = "bad.jpg"
+    (tmp_path / "bad.jpg").write_bytes(payload)
+
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        render_video_note(note, base_dir=tmp_path)
 
 
 def test_cli_success_creates_parent_resolves_media_and_is_deterministic(tmp_path):
@@ -228,7 +317,11 @@ def test_cli_success_creates_parent_resolves_media_and_is_deterministic(tmp_path
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("missing-image.json", "media.image does not exist: media/nope.png"),
+        (
+            "missing-image.json",
+            'note.sections[0].blocks[0][id="missing-media"].image '
+            "does not exist: media/nope.png",
+        ),
         ("invalid-url.json", "meta.source_url must use HTTP or HTTPS"),
     ],
 )
@@ -240,6 +333,38 @@ def test_cli_input_errors_are_precise_and_atomic(tmp_path, name, expected):
     )
     assert result.returncode == 2
     assert expected in result.stderr
+    assert output.read_text(encoding="utf-8") == "KEEP"
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda note: note["meta"].__setitem__("title", "\ud800"),
+            "note.meta.title contains invalid Unicode",
+        ),
+        (
+            lambda note: note["sections"][0]["blocks"][0].__setitem__(
+                "\udfff", "bad"
+            ),
+            "note.sections[0].blocks[0].<key[3]> contains invalid Unicode",
+        ),
+    ],
+)
+def test_cli_rejects_unpaired_surrogates_atomically(tmp_path, mutate, expected):
+    note = fixture("minimal.json")
+    mutate(note)
+    note_path = tmp_path / "surrogate.json"
+    note_path.write_text(json.dumps(note), encoding="utf-8")
+    output = tmp_path / "existing.html"
+    output.write_text("KEEP", encoding="utf-8")
+
+    result = run_cli("--note", note_path, "--output", output, "--profile", "web")
+
+    assert result.returncode == 2
+    assert expected in result.stderr
+    result.stderr.encode("utf-8")
     assert output.read_text(encoding="utf-8") == "KEEP"
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
 
@@ -293,3 +418,27 @@ def test_cli_unexpected_failure_returns_4_without_output(tmp_path, monkeypatch, 
     assert exit_code == 4
     assert "unexpected renderer error" in capsys.readouterr().err
     assert not output.exists()
+
+
+def test_cli_defensively_rejects_unencodable_renderer_output(
+    tmp_path, monkeypatch, capsys
+):
+    assert main is not None
+    output = tmp_path / "existing.html"
+    output.write_text("KEEP", encoding="utf-8")
+    monkeypatch.setattr(
+        render_html,
+        "render_video_note",
+        lambda note, *, base_dir=None: "\ud800",
+    )
+
+    exit_code = main([
+        "--note", str(FIXTURES / "minimal.json"),
+        "--output", str(output),
+        "--profile", "web",
+    ])
+
+    assert exit_code == 4
+    assert "unexpected renderer error" in capsys.readouterr().err
+    assert output.read_text(encoding="utf-8") == "KEEP"
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []

@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -117,6 +118,78 @@ def test_only_http_and_https_user_links_are_allowed():
     note = fixture("full.json")
     note["sections"][0]["blocks"][1]["deep_link"] = "file:///private/frame.jpg"
     with pytest.raises(ValueError, match="HTTP"):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_section_and_block_field_errors_include_indices_and_source_id():
+    note = fixture("minimal.json")
+    note["sections"][0]["title"] = ""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0][id="intro"].title must be a non-empty string'
+        ),
+    ):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+    note = fixture("minimal.json")
+    note["sections"][0]["blocks"][0]["text"] = ""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0].blocks[0][id="intro-text"].text '
+            "must be a non-empty string"
+        ),
+    ):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_table_row_error_includes_section_block_and_row_path():
+    note = fixture("full.json")
+    note["sections"][0]["blocks"][0]["rows"][0].pop("purpose")
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0].blocks[0][id="full-table"].rows[0] '
+            "must contain exactly the declared columns"
+        ),
+    ):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_feature_card_and_nested_accordion_errors_have_exact_paths():
+    note = fixture("all-blocks.json")
+    note["sections"][0]["blocks"][5]["cards"][0]["link"] = "file:///unsafe"
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0].blocks[5][id="alpha-grid"].cards[0].link '
+            "must use HTTP or HTTPS"
+        ),
+    ):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+    note = fixture("all-blocks.json")
+    note["sections"][0]["blocks"][8]["blocks"][0]["text"] = ""
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0].blocks[8][id="alpha-accordion"].blocks[0]'
+            '[id="alpha-accordion-text"].text must be a non-empty string'
+        ),
+    ):
+        normalize_video_note(note, base_dir=FIXTURES)
+
+
+def test_media_image_error_names_section_block_field_and_path():
+    note = fixture("missing-image.json")
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            'note.sections[0].blocks[0][id="missing-media"].image '
+            "does not exist: media/nope.png"
+        ),
+    ):
         normalize_video_note(note, base_dir=FIXTURES)
 
 
@@ -294,7 +367,7 @@ def test_evidence_sentinels_are_rejected_case_insensitively_when_embedded(sentin
 
 def test_normalization_has_one_meta_object_assignment():
     source = (ROOT / "scripts" / "render_html.py").read_text(encoding="utf-8")
-    assert source.count('meta = _object(note["meta"], "meta")') == 1
+    assert source.count('meta = _object(note["meta"], "note.meta")') == 1
 
 
 def test_legacy_mapping_ignores_unmapped_caller_metadata():

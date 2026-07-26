@@ -25,7 +25,15 @@ _FORBIDDEN_KEY_PARTS = (
     "svg",
 )
 _SENTINELS = ("evidence_sentinel", "evidence_leak_sentinel_9f2a")
-_IMAGE_SUFFIXES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+_IMAGE_FORMATS = {
+    ".jpg": ("image/jpeg", "JPEG"),
+    ".jpeg": ("image/jpeg", "JPEG"),
+    ".png": ("image/png", "PNG"),
+    ".webp": ("image/webp", "WebP"),
+}
+_IMAGE_SUFFIXES = {
+    suffix: media_type for suffix, (media_type, _) in _IMAGE_FORMATS.items()
+}
 
 
 def stable_json_dumps(note: dict) -> str:
@@ -35,6 +43,41 @@ def stable_json_dumps(note: dict) -> str:
 
 def _fail(message: str) -> None:
     raise ValueError(message)
+
+
+def _path_child(path: str, key: str) -> str:
+    if (
+        key
+        and key.isascii()
+        and (key[0].isalpha() or key[0] == "_")
+        and all(character.isalnum() or character == "_" for character in key[1:])
+    ):
+        return f"{path}.{key}"
+    return f"{path}[{json.dumps(key, ensure_ascii=True)}]"
+
+
+def _path_with_id(path: str, source_id: str) -> str:
+    return f"{path}[id={json.dumps(source_id, ensure_ascii=True)}]"
+
+
+def _reject_invalid_unicode(value, path: str = "note") -> None:
+    if isinstance(value, dict):
+        for index, (key, child) in enumerate(value.items()):
+            if not isinstance(key, str):
+                _fail(f"{path}.<key[{index}]> must be a string")
+            try:
+                key.encode("utf-8", errors="strict")
+            except UnicodeEncodeError:
+                _fail(f"{path}.<key[{index}]> contains invalid Unicode")
+            _reject_invalid_unicode(child, _path_child(path, key))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_invalid_unicode(child, f"{path}[{index}]")
+    elif isinstance(value, str):
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError:
+            _fail(f"{path} contains invalid Unicode")
 
 
 def _object(value, name: str) -> dict:
@@ -69,8 +112,8 @@ def _reject_evidence(value, path: str = "note") -> None:
         for key, child in value.items():
             normalized_key = key.casefold().replace("-", "_")
             if any(part in normalized_key for part in _FORBIDDEN_KEY_PARTS):
-                _fail(f"{path}.{key} is not reader-facing content")
-            _reject_evidence(child, f"{path}.{key}")
+                _fail(f"{_path_child(path, key)} is not reader-facing content")
+            _reject_evidence(child, _path_child(path, key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _reject_evidence(child, f"{path}[{index}]")
@@ -88,228 +131,425 @@ def _http_url(value, name: str) -> str:
     return value
 
 
-def _image_path(value, base_dir: Path | None) -> str:
-    raw = _text(value, "media.image")
+def _detect_image_signature(header: bytes) -> str | None:
+    if header.startswith(b"\xff\xd8\xff"):
+        return "JPEG"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "PNG"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "WebP"
+    return None
+
+
+def _validate_image_signature(
+    candidate: Path, suffix: str, field_path: str, raw: str
+) -> None:
+    try:
+        with candidate.open("rb") as source:
+            header = source.read(12)
+    except OSError as exc:
+        _fail(f"{field_path} cannot be read: {raw}: {exc}")
+    actual = _detect_image_signature(header)
+    expected = _IMAGE_FORMATS[suffix][1]
+    if actual is None:
+        _fail(f"{field_path} has unsupported image signature: {raw}")
+    if actual != expected:
+        _fail(
+            f"{field_path} signature does not match {expected}: {raw}"
+        )
+
+
+def _image_path(value, base_dir: Path | None, field_path: str) -> str:
+    raw = _text(value, field_path)
     path = Path(raw)
-    if path.suffix.casefold() not in _IMAGE_SUFFIXES:
-        _fail("media.image must be JPEG, PNG, or WebP")
+    suffix = path.suffix.casefold()
+    if suffix not in _IMAGE_SUFFIXES:
+        _fail(f"{field_path} must be JPEG, PNG, or WebP: {raw}")
+    candidate = None
     if base_dir is not None:
         if path.is_absolute():
-            _fail("media.image must be relative when base_dir is provided")
+            _fail(f"{field_path} must be relative when base_dir is provided: {raw}")
         base = base_dir.resolve()
         candidate = (base / path).resolve()
         try:
             candidate.relative_to(base)
         except ValueError:
-            _fail(f"media.image escapes its base directory: {raw}")
+            _fail(f"{field_path} escapes its base directory: {raw}")
         if not candidate.is_file():
-            _fail(f"media.image does not exist: {raw}")
+            _fail(f"{field_path} does not exist: {raw}")
     elif not path.is_absolute() and ".." in path.parts:
-        _fail("media.image must stay within its base directory")
+        _fail(f"{field_path} must stay within its base directory: {raw}")
+    elif path.is_absolute() or path.exists():
+        candidate = path.resolve()
+        if not candidate.is_file():
+            _fail(f"{field_path} does not exist: {raw}")
+    if candidate is not None:
+        _validate_image_signature(candidate, suffix, field_path, raw)
     return raw
 
 
-def _block_id(value: dict, used_ids: set[str], name: str) -> str:
-    block_id = _text(value.get("id"), f"{name}.id")
+def _block_id(value: dict, used_ids: set[str], path: str) -> str:
+    block_id = _text(value.get("id"), f"{path}.id")
     if block_id in used_ids:
-        _fail(f"IDs must be globally unique: {block_id}")
+        _fail(
+            f"{path}.id duplicates a source ID; source IDs must be globally "
+            f"unique: {block_id}"
+        )
     used_ids.add(block_id)
     return block_id
 
 
-def _normalize_block(value, used_ids: set[str], base_dir: Path | None, *, nested: bool = False) -> dict:
-    block = _object(value, "block")
-    block_type = _text(block.get("type"), "block.type")
+def _normalize_block(
+    value,
+    used_ids: set[str],
+    base_dir: Path | None,
+    path: str,
+    *,
+    nested: bool = False,
+) -> dict:
+    block = _object(value, path)
+    block_type = _text(block.get("type"), f"{path}.type")
     allowed_nested = {"paragraph", "list", "callout"}
     if nested and block_type not in allowed_nested:
-        _fail("accordion blocks may only be paragraph, list, or callout")
-    block_id = _block_id(block, used_ids, "block")
+        _fail(
+            f"{path}.type must be paragraph, list, or callout inside an accordion"
+        )
+    block_id = _block_id(block, used_ids, path)
+    block_path = _path_with_id(path, block_id)
 
     if block_type == "paragraph":
-        _keys(block, "paragraph", {"id", "type", "text"}, {"id", "type", "text"})
-        return {"id": block_id, "type": block_type, "text": _text(block["text"], "paragraph.text")}
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "text"},
+            {"id", "type", "text"},
+        )
+        return {
+            "id": block_id,
+            "type": block_type,
+            "text": _text(block["text"], f"{block_path}.text"),
+        }
 
     if block_type == "callout":
-        _keys(block, "callout", {"id", "type", "kind", "text"}, {"id", "type", "kind", "text"})
-        kind = _text(block["kind"], "callout.kind")
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "kind", "text"},
+            {"id", "type", "kind", "text"},
+        )
+        kind = _text(block["kind"], f"{block_path}.kind")
         if kind not in {"key", "source", "recommendation", "inference", "notice"}:
-            _fail("callout.kind is unsupported")
-        return {"id": block_id, "type": block_type, "kind": kind, "text": _text(block["text"], "callout.text")}
+            _fail(f"{block_path}.kind is unsupported: {kind}")
+        return {
+            "id": block_id,
+            "type": block_type,
+            "kind": kind,
+            "text": _text(block["text"], f"{block_path}.text"),
+        }
 
     if block_type == "list":
-        _keys(block, "list", {"id", "type", "items"}, {"id", "type", "items"})
-        items = [_text(item, "list item") for item in _list(block["items"], "list.items")]
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "items"},
+            {"id", "type", "items"},
+        )
+        items_path = f"{block_path}.items"
+        items = [
+            _text(item, f"{items_path}[{index}]")
+            for index, item in enumerate(_list(block["items"], items_path))
+        ]
         if not items:
-            _fail("list.items must not be empty")
+            _fail(f"{items_path} must not be empty")
         return {"id": block_id, "type": block_type, "items": items}
 
     if block_type == "table":
-        _keys(block, "table", {"id", "type", "columns", "rows"}, {"id", "type", "columns", "rows"})
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "columns", "rows"},
+            {"id", "type", "columns", "rows"},
+        )
         columns = []
         column_ids = set()
-        for column in _list(block["columns"], "table.columns"):
-            column = _object(column, "table column")
-            _keys(column, "table column", {"id", "label"}, {"id", "label"})
-            column_id = _text(column["id"], "table column.id")
+        columns_path = f"{block_path}.columns"
+        for column_index, column in enumerate(
+            _list(block["columns"], columns_path)
+        ):
+            column_path = f"{columns_path}[{column_index}]"
+            column = _object(column, column_path)
+            _keys(column, column_path, {"id", "label"}, {"id", "label"})
+            column_id = _text(column["id"], f"{column_path}.id")
             if column_id in column_ids:
-                _fail(f"table columns must be unique: {column_id}")
+                _fail(f"{column_path}.id duplicates a table column: {column_id}")
             column_ids.add(column_id)
-            columns.append({"id": column_id, "label": _text(column["label"], "table column.label")})
+            columns.append(
+                {
+                    "id": column_id,
+                    "label": _text(column["label"], f"{column_path}.label"),
+                }
+            )
         if not columns:
-            _fail("table.columns must not be empty")
+            _fail(f"{columns_path} must not be empty")
         rows = []
-        for row in _list(block["rows"], "table.rows"):
-            row = _object(row, "table row")
+        rows_path = f"{block_path}.rows"
+        for row_index, row in enumerate(_list(block["rows"], rows_path)):
+            row_path = f"{rows_path}[{row_index}]"
+            row = _object(row, row_path)
             if set(row) != column_ids:
-                _fail("table rows must contain exactly the declared columns")
+                _fail(f"{row_path} must contain exactly the declared columns")
             normalized_row = {}
-            for column_id in columns:
-                value = row[column_id["id"]]
+            for column in columns:
+                column_id = column["id"]
+                cell_path = _path_child(row_path, column_id)
+                value = row[column_id]
                 if isinstance(value, (dict, list)) or isinstance(value, bool) or value is None:
-                    _fail("table cell values must be text or numbers")
-                normalized_row[column_id["id"]] = str(value)
+                    _fail(f"{cell_path} must be text or a number")
+                normalized_row[column_id] = str(value)
             rows.append(normalized_row)
         return {"id": block_id, "type": block_type, "columns": columns, "rows": rows}
 
     if block_type == "media":
         _keys(
             block,
-            "media",
+            block_path,
             {"id", "type", "image", "alt", "headline", "explanation"},
             {"id", "type", "image", "alt", "headline", "explanation", "usage", "timestamp_seconds", "deep_link"},
         )
         timestamp = block.get("timestamp_seconds")
         if timestamp is not None and (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp < 0):
-            _fail("media.timestamp_seconds must be non-negative")
+            _fail(f"{block_path}.timestamp_seconds must be non-negative")
         deep_link = block.get("deep_link")
         return {
             "id": block_id,
             "type": block_type,
-            "image": _image_path(block["image"], base_dir),
-            "alt": _text(block["alt"], "media.alt"),
-            "headline": _text(block["headline"], "media.headline"),
-            "explanation": _text(block["explanation"], "media.explanation"),
-            "usage": _text(block.get("usage", ""), "media.usage", allow_empty=True),
+            "image": _image_path(block["image"], base_dir, f"{block_path}.image"),
+            "alt": _text(block["alt"], f"{block_path}.alt"),
+            "headline": _text(block["headline"], f"{block_path}.headline"),
+            "explanation": _text(
+                block["explanation"], f"{block_path}.explanation"
+            ),
+            "usage": _text(
+                block.get("usage", ""),
+                f"{block_path}.usage",
+                allow_empty=True,
+            ),
             "timestamp_seconds": timestamp,
-            "deep_link": None if deep_link is None else _http_url(deep_link, "media.deep_link"),
+            "deep_link": (
+                None
+                if deep_link is None
+                else _http_url(deep_link, f"{block_path}.deep_link")
+            ),
         }
 
     if block_type == "feature_grid":
-        _keys(block, "feature_grid", {"id", "type", "cards"}, {"id", "type", "cards", "filter_label"})
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "cards"},
+            {"id", "type", "cards", "filter_label"},
+        )
         cards = []
         card_ids = set()
-        for card in _list(block["cards"], "feature_grid.cards"):
-            card = _object(card, "feature card")
-            _keys(card, "feature card", {"id", "category", "title", "description"}, {"id", "category", "title", "description", "link"})
-            card_id = _text(card["id"], "feature card.id")
+        cards_path = f"{block_path}.cards"
+        for card_index, card in enumerate(_list(block["cards"], cards_path)):
+            card_path = f"{cards_path}[{card_index}]"
+            card = _object(card, card_path)
+            _keys(
+                card,
+                card_path,
+                {"id", "category", "title", "description"},
+                {"id", "category", "title", "description", "link"},
+            )
+            card_id = _text(card["id"], f"{card_path}.id")
             if card_id in card_ids:
-                _fail(f"feature card IDs must be unique: {card_id}")
+                _fail(f"{card_path}.id duplicates a feature card: {card_id}")
             card_ids.add(card_id)
             link = card.get("link")
             cards.append({
                 "id": card_id,
-                "category": _text(card["category"], "feature card.category"),
-                "title": _text(card["title"], "feature card.title"),
-                "description": _text(card["description"], "feature card.description"),
-                "link": None if link is None else _http_url(link, "feature card.link"),
+                "category": _text(card["category"], f"{card_path}.category"),
+                "title": _text(card["title"], f"{card_path}.title"),
+                "description": _text(
+                    card["description"], f"{card_path}.description"
+                ),
+                "link": (
+                    None
+                    if link is None
+                    else _http_url(link, f"{card_path}.link")
+                ),
             })
         if not cards:
-            _fail("feature_grid.cards must not be empty")
+            _fail(f"{cards_path} must not be empty")
         return {
             "id": block_id,
             "type": block_type,
-            "filter_label": _text(block.get("filter_label", "category"), "feature_grid.filter_label"),
+            "filter_label": _text(
+                block.get("filter_label", "category"),
+                f"{block_path}.filter_label",
+            ),
             "cards": cards,
         }
 
     if block_type == "code":
-        _keys(block, "code", {"id", "type", "text"}, {"id", "type", "text", "language"})
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "text"},
+            {"id", "type", "text", "language"},
+        )
         return {
             "id": block_id,
             "type": block_type,
-            "text": _text(block["text"], "code.text", allow_empty=True),
-            "language": _text(block.get("language", "text"), "code.language"),
+            "text": _text(
+                block["text"], f"{block_path}.text", allow_empty=True
+            ),
+            "language": _text(
+                block.get("language", "text"), f"{block_path}.language"
+            ),
         }
 
     if block_type == "flow":
-        _keys(block, "flow", {"id", "type", "nodes", "edges"}, {"id", "type", "nodes", "edges"})
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "nodes", "edges"},
+            {"id", "type", "nodes", "edges"},
+        )
         nodes = []
         node_ids = set()
-        for node in _list(block["nodes"], "flow.nodes"):
-            node = _object(node, "flow node")
-            _keys(node, "flow node", {"id", "label"}, {"id", "label"})
-            node_id = _text(node["id"], "flow node.id")
+        nodes_path = f"{block_path}.nodes"
+        for node_index, node in enumerate(_list(block["nodes"], nodes_path)):
+            node_path = f"{nodes_path}[{node_index}]"
+            node = _object(node, node_path)
+            _keys(node, node_path, {"id", "label"}, {"id", "label"})
+            node_id = _text(node["id"], f"{node_path}.id")
             if node_id in node_ids:
-                _fail(f"flow node IDs must be unique: {node_id}")
+                _fail(f"{node_path}.id duplicates a flow node: {node_id}")
             node_ids.add(node_id)
-            nodes.append({"id": node_id, "label": _text(node["label"], "flow node.label")})
+            nodes.append(
+                {
+                    "id": node_id,
+                    "label": _text(node["label"], f"{node_path}.label"),
+                }
+            )
         edges = []
-        for edge in _list(block["edges"], "flow.edges"):
-            edge = _object(edge, "flow edge")
-            _keys(edge, "flow edge", {"from", "to"}, {"from", "to", "label"})
-            source = _text(edge["from"], "flow edge.from")
-            target = _text(edge["to"], "flow edge.to")
+        edges_path = f"{block_path}.edges"
+        for edge_index, edge in enumerate(_list(block["edges"], edges_path)):
+            edge_path = f"{edges_path}[{edge_index}]"
+            edge = _object(edge, edge_path)
+            _keys(edge, edge_path, {"from", "to"}, {"from", "to", "label"})
+            source = _text(edge["from"], f"{edge_path}.from")
+            target = _text(edge["to"], f"{edge_path}.to")
             if source not in node_ids or target not in node_ids:
-                _fail("flow edges must reference declared nodes")
-            edges.append({"from": source, "to": target, "label": _text(edge.get("label", ""), "flow edge.label", allow_empty=True)})
+                _fail(f"{edge_path} must reference declared nodes")
+            edges.append(
+                {
+                    "from": source,
+                    "to": target,
+                    "label": _text(
+                        edge.get("label", ""),
+                        f"{edge_path}.label",
+                        allow_empty=True,
+                    ),
+                }
+            )
         return {"id": block_id, "type": block_type, "nodes": nodes, "edges": edges}
 
     if block_type == "accordion":
-        _keys(block, "accordion", {"id", "type", "title", "blocks"}, {"id", "type", "title", "blocks"})
-        child_blocks = [_normalize_block(child, used_ids, base_dir, nested=True) for child in _list(block["blocks"], "accordion.blocks")]
+        _keys(
+            block,
+            block_path,
+            {"id", "type", "title", "blocks"},
+            {"id", "type", "title", "blocks"},
+        )
+        child_path = f"{block_path}.blocks"
+        child_blocks = [
+            _normalize_block(
+                child,
+                used_ids,
+                base_dir,
+                f"{child_path}[{index}]",
+                nested=True,
+            )
+            for index, child in enumerate(_list(block["blocks"], child_path))
+        ]
         if not child_blocks:
-            _fail("accordion.blocks must not be empty")
-        return {"id": block_id, "type": block_type, "title": _text(block["title"], "accordion.title"), "blocks": child_blocks}
+            _fail(f"{child_path} must not be empty")
+        return {
+            "id": block_id,
+            "type": block_type,
+            "title": _text(block["title"], f"{block_path}.title"),
+            "blocks": child_blocks,
+        }
 
-    _fail(f"unsupported block type: {block_type}")
+    _fail(f"{path}.type is unsupported: {block_type}")
 
 
 def normalize_video_note(note: dict, *, base_dir: str | Path | None = None) -> dict:
     """Validate a strict v2 note and return its deterministic normalized form."""
+    _reject_invalid_unicode(note)
     _reject_evidence(note)
     note = _object(note, "note")
     _keys(note, "note", {"schema_version", "meta", "summary", "sections"}, {"schema_version", "meta", "summary", "sections"})
     if note["schema_version"] != SCHEMA_VERSION:
-        _fail(f"schema_version must be {SCHEMA_VERSION}")
-    meta = _object(note["meta"], "meta")
-    _keys(meta, "meta", {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"}, {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"})
+        _fail(f"note.schema_version must be {SCHEMA_VERSION}")
+    meta = _object(note["meta"], "note.meta")
+    _keys(meta, "note.meta", {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"}, {"platform", "source_id", "source_url", "title", "author", "duration_seconds", "language"})
     duration = meta["duration_seconds"]
     if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
-        _fail("meta.duration_seconds must be non-negative")
+        _fail("note.meta.duration_seconds must be non-negative")
     normalized_meta = {
-        "platform": _text(meta["platform"], "meta.platform"),
-        "source_id": _text(meta["source_id"], "meta.source_id"),
-        "source_url": _http_url(meta["source_url"], "meta.source_url"),
-        "title": _text(meta["title"], "meta.title"),
-        "author": _text(meta["author"], "meta.author", allow_empty=True),
+        "platform": _text(meta["platform"], "note.meta.platform"),
+        "source_id": _text(meta["source_id"], "note.meta.source_id"),
+        "source_url": _http_url(meta["source_url"], "note.meta.source_url"),
+        "title": _text(meta["title"], "note.meta.title"),
+        "author": _text(meta["author"], "note.meta.author", allow_empty=True),
         "duration_seconds": duration,
-        "language": _text(meta["language"], "meta.language"),
+        "language": _text(meta["language"], "note.meta.language"),
     }
     base = None if base_dir is None else Path(base_dir)
     used_ids = set()
     sections = []
     section_ids = set()
-    for section in _list(note["sections"], "sections"):
-        section = _object(section, "section")
-        _keys(section, "section", {"id", "title", "summary", "blocks"}, {"id", "title", "summary", "blocks"})
-        section_id = _text(section["id"], "section.id")
+    for section_index, section in enumerate(
+        _list(note["sections"], "note.sections")
+    ):
+        section_path = f"note.sections[{section_index}]"
+        section = _object(section, section_path)
+        _keys(section, section_path, {"id", "title", "summary", "blocks"}, {"id", "title", "summary", "blocks"})
+        section_id = _text(section["id"], f"{section_path}.id")
+        labelled_section_path = _path_with_id(section_path, section_id)
         if section_id in section_ids or section_id in used_ids:
-            _fail(f"IDs must be globally unique: {section_id}")
+            _fail(
+                f"{section_path}.id duplicates a source ID; source IDs must be "
+                f"globally unique: {section_id}"
+            )
         section_ids.add(section_id)
         used_ids.add(section_id)
-        blocks = [_normalize_block(block, used_ids, base) for block in _list(section["blocks"], "section.blocks")]
+        blocks_path = f"{section_path}.blocks"
+        blocks = [
+            _normalize_block(
+                block, used_ids, base, f"{blocks_path}[{block_index}]"
+            )
+            for block_index, block in enumerate(
+                _list(section["blocks"], f"{labelled_section_path}.blocks")
+            )
+        ]
         sections.append({
             "id": section_id,
-            "title": _text(section["title"], "section.title"),
-            "summary": _text(section["summary"], "section.summary"),
+            "title": _text(section["title"], f"{labelled_section_path}.title"),
+            "summary": _text(
+                section["summary"], f"{labelled_section_path}.summary"
+            ),
             "blocks": blocks,
         })
     if not sections:
-        _fail("sections must not be empty")
+        _fail("note.sections must not be empty")
     return {
         "schema_version": SCHEMA_VERSION,
         "meta": normalized_meta,
-        "summary": _text(note["summary"], "summary"),
+        "summary": _text(note["summary"], "note.summary"),
         "sections": sections,
     }
 
@@ -492,6 +732,7 @@ img,video,svg,canvas{max-width:100%;height:auto}
   .shell{display:block;max-width:none;padding:0}
   main{width:100%}
   section,.hero,.figure-card,.feature-card{box-shadow:none;break-inside:avoid}
+  .feature-card[hidden]{display:block!important}
   .accordion-panel[hidden]{display:block}
 }
 """
@@ -502,6 +743,7 @@ document.querySelectorAll('.feature-toolbar').forEach((toolbar) => {
   toolbar.querySelectorAll('.filter-btn').forEach((button) => {
     button.addEventListener('click', () => {
       const selected = button.dataset.filter;
+      const showAll = button.dataset.filterMode === 'all';
       button.setAttribute('aria-pressed', 'true');
       toolbar.querySelectorAll('.filter-btn').forEach((item) => {
         const active = item === button;
@@ -509,7 +751,7 @@ document.querySelectorAll('.feature-toolbar').forEach((toolbar) => {
         item.classList.toggle('active', active);
       });
       cards.forEach((card) => {
-        card.hidden = selected !== 'all' && card.dataset.category !== selected;
+        card.hidden = !showAll && card.dataset.category !== selected;
       });
     });
   });
@@ -536,9 +778,13 @@ async function copyText(text) {
   helper.style.position = 'fixed';
   helper.style.opacity = '0';
   document.body.appendChild(helper);
-  helper.select();
-  const copied = document.execCommand('copy');
-  helper.remove();
+  let copied = false;
+  try {
+    helper.select();
+    copied = document.execCommand('copy');
+  } finally {
+    helper.remove();
+  }
   if (!copied) throw new Error('copy unavailable');
 }
 
@@ -561,9 +807,24 @@ def _attribute(value) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _id_token(source_id: str) -> str:
+    encoded = base64.urlsafe_b64encode(source_id.encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _source_dom_id(source_id: str) -> str:
+    return f"vn-src-{_id_token(source_id)}"
+
+
+def _owned_dom_id(role: str, source_id: str | None = None) -> str:
+    if source_id is None:
+        return f"vn-owned-{role}"
+    return f"vn-owned-{role}-{_id_token(source_id)}"
+
+
 def _render_block(block: dict, base_dir: Path | None) -> str:
     kind = block["type"]
-    block_id = _attribute(block["id"])
+    block_id = _source_dom_id(block["id"])
     if kind == "paragraph":
         return f'<p id="{block_id}">{html.escape(block["text"])}</p>'
     if kind == "callout":
@@ -618,11 +879,12 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
         categories = list(dict.fromkeys(card["category"] for card in block["cards"]))
         buttons = [
             '<button type="button" class="filter-btn active" aria-pressed="true" '
-            'data-filter="all">全部</button>'
+            'data-filter-mode="all">全部</button>'
         ]
         buttons.extend(
             '<button type="button" class="filter-btn" aria-pressed="false" '
-            f'data-filter="{_attribute(category)}">{html.escape(category)}</button>'
+            f'data-filter-mode="category" data-filter="{_attribute(category)}">'
+            f"{html.escape(category)}</button>"
             for category in categories
         )
         cards = []
@@ -648,8 +910,8 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
             f'{"".join(cards)}</div></div>'
         )
     if kind == "code":
-        code_id = f"{block_id}-code"
-        status_id = f"{block_id}-status"
+        code_id = _owned_dom_id("code", block["id"])
+        status_id = _owned_dom_id("copy-status", block["id"])
         return (
             f'<div id="{block_id}" class="codebox">'
             f'<button type="button" class="copy" data-copy-target="{code_id}" '
@@ -677,8 +939,8 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
             + "</ol>"
         )
     if kind == "accordion":
-        toggle_id = f"{block_id}-toggle"
-        panel_id = f"{block_id}-panel"
+        toggle_id = _owned_dom_id("accordion-toggle", block["id"])
+        panel_id = _owned_dom_id("accordion-panel", block["id"])
         children = "".join(_render_block(child, base_dir) for child in block["blocks"])
         return (
             f'<div id="{block_id}" class="accordion">'
@@ -701,12 +963,15 @@ def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
     badge = f"{html.escape(meta['platform'])} · {html.escape(meta['source_id'])}"
     author = html.escape(meta["author"] or "未提供")
     navigation = "".join(
-        f'<a href="#{_attribute(section["id"])}">{html.escape(section["title"])}</a>'
+        f'<a href="#{_source_dom_id(section["id"])}">'
+        f'{html.escape(section["title"])}</a>'
         for section in normalized["sections"]
     )
     sections = "".join(
-        f'<section id="{_attribute(section["id"])}" aria-labelledby="{_attribute(section["id"])}-title">'
-        f'<h2 id="{_attribute(section["id"])}-title">{html.escape(section["title"])}</h2>'
+        f'<section id="{_source_dom_id(section["id"])}" '
+        f'aria-labelledby="{_owned_dom_id("section-title", section["id"])}">'
+        f'<h2 id="{_owned_dom_id("section-title", section["id"])}">'
+        f'{html.escape(section["title"])}</h2>'
         f'<p class="section-summary">{html.escape(section["summary"])}</p>'
         f'{"".join(_render_block(block, base) for block in section["blocks"])}</section>'
         for section in normalized["sections"]
@@ -721,10 +986,10 @@ def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
 <style>{_WEB_STYLE}</style>
 </head>
 <body>
-<a class="skip-link" href="#main-content">跳到主要内容</a>
+<a class="skip-link" href="#vn-owned-main">跳到主要内容</a>
 <div class="shell">
 <nav aria-label="视频笔记目录"><strong>目录</strong>{navigation}</nav>
-<main id="main-content">
+<main id="vn-owned-main">
 <header class="hero">
 <span class="badge">{badge}</span>
 <h1>{title}</h1>
@@ -743,6 +1008,8 @@ def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
 </body>
 </html>
 """
+
+
 def render_document(meta: dict, sections: list) -> str:
     """Retain the legacy Bilibili caller API while rendering through v2."""
     normalized = normalize_legacy_document(meta, sections)
@@ -772,10 +1039,16 @@ def main(argv: list[str] | None = None) -> int:
                 f"{note_path}"
             )
         document = render_video_note(note, base_dir=note_path.parent)
-    except (ValueError, OSError, UnicodeError) as exc:
+    except (ValueError, OSError, UnicodeDecodeError) as exc:
         print(f"input error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
+        print(f"unexpected renderer error: {exc}", file=sys.stderr)
+        return 4
+
+    try:
+        document_bytes = document.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
         print(f"unexpected renderer error: {exc}", file=sys.stderr)
         return 4
 
@@ -783,15 +1056,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
+            mode="wb",
             dir=output_path.parent,
             prefix=f".{output_path.name}.",
             suffix=".tmp",
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
-            temporary.write(document)
+            temporary.write(document_bytes)
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_path, output_path)
