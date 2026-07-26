@@ -397,6 +397,8 @@ def test_email_renders_every_media_field_and_data_uri_exactly_once_in_order():
             "alt": "ALT-JPEG-UNIQUE",
             "headline": "HEADLINE-JPEG-UNIQUE",
             "explanation": "EXPLANATION-JPEG-UNIQUE",
+            "usage": "USAGE-JPEG-UNIQUE",
+            "deep_link": "https://example.test/watch?media=jpeg&mode=email",
         },
         {
             "id": "media-png-unique",
@@ -405,6 +407,8 @@ def test_email_renders_every_media_field_and_data_uri_exactly_once_in_order():
             "alt": "ALT-PNG-UNIQUE",
             "headline": "HEADLINE-PNG-UNIQUE",
             "explanation": "EXPLANATION-PNG-UNIQUE",
+            "usage": "USAGE-PNG-UNIQUE",
+            "deep_link": "https://example.test/watch?media=png&mode=email",
         },
         {
             "id": "media-webp-unique",
@@ -413,10 +417,26 @@ def test_email_renders_every_media_field_and_data_uri_exactly_once_in_order():
             "alt": "ALT-WEBP-UNIQUE",
             "headline": "HEADLINE-WEBP-UNIQUE",
             "explanation": "EXPLANATION-WEBP-UNIQUE",
+            "usage": "USAGE-WEBP-UNIQUE",
+            "deep_link": "https://example.test/watch?media=webp&mode=email",
         },
     ]
 
     document = render_email(note)
+    expected_media_links = [
+        (
+            "https://example.test/watch?media=jpeg&amp;mode=email",
+            "打开对应视频位置",
+        ),
+        (
+            "https://example.test/watch?media=png&amp;mode=email",
+            "打开对应视频位置",
+        ),
+        (
+            "https://example.test/watch?media=webp&amp;mode=email",
+            "打开对应视频位置",
+        ),
+    ]
 
     assert_once_in_order(
         document,
@@ -425,16 +445,30 @@ def test_email_renders_every_media_field_and_data_uri_exactly_once_in_order():
             "ALT-JPEG-UNIQUE",
             "HEADLINE-JPEG-UNIQUE",
             "EXPLANATION-JPEG-UNIQUE",
+            "USAGE-JPEG-UNIQUE",
+            'href="https://example.test/watch?media=jpeg&amp;mode=email"',
             "data:image/png;base64,",
             "ALT-PNG-UNIQUE",
             "HEADLINE-PNG-UNIQUE",
             "EXPLANATION-PNG-UNIQUE",
+            "USAGE-PNG-UNIQUE",
+            'href="https://example.test/watch?media=png&amp;mode=email"',
             "data:image/webp;base64,",
             "ALT-WEBP-UNIQUE",
             "HEADLINE-WEBP-UNIQUE",
             "EXPLANATION-WEBP-UNIQUE",
+            "USAGE-WEBP-UNIQUE",
+            'href="https://example.test/watch?media=webp&amp;mode=email"',
         ],
     )
+    media_links = re.findall(
+        r'<a\b[^>]*href="(https://example\.test/watch\?media=(?:jpeg|png|webp)'
+        r'&amp;mode=email)"[^>]*>([^<]*)</a>',
+        document,
+    )
+    assert media_links == expected_media_links
+    assert document.count(">打开对应视频位置</a>") == len(expected_media_links)
+    assert static_email_violations(document) == []
 
 
 @pytest.mark.parametrize(
