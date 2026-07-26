@@ -954,8 +954,181 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
     raise AssertionError(f"unknown normalized block: {kind}")
 
 
-def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
+def _render_email_block(block: dict, base_dir: Path | None) -> str:
+    """Render one validated block without CSS, JavaScript, or hidden content."""
+    kind = block["type"]
+    block_id = _source_dom_id(block["id"])
+    text_style = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#1d2330;line-height:1.65;"
+    if kind == "paragraph":
+        return f'<p id="{block_id}" style="{text_style}margin:14px 0;">{html.escape(block["text"])}</p>'
+    if kind == "callout":
+        colors = {
+            "key": ("#fffbed", "#e8c948"),
+            "source": ("#edfafa", "#0f8b99"),
+            "recommendation": ("#ecfdf5", "#1f9d68"),
+            "inference": ("#f5f0ff", "#7c4dce"),
+            "notice": ("#fff4e8", "#e98324"),
+        }
+        background, border = colors[block["kind"]]
+        return (
+            f'<aside id="{block_id}" style="{text_style}margin:16px 0;padding:14px 16px;'
+            f'background:{background};border-left:4px solid {border};">'
+            f'{html.escape(block["text"])}</aside>'
+        )
+    if kind == "list":
+        items = "".join(f"<li>{html.escape(item)}</li>" for item in block["items"])
+        return f'<ul id="{block_id}" style="{text_style}margin:14px 0;padding-left:24px;">{items}</ul>'
+    if kind == "table":
+        header = "".join(
+            f'<th scope="col" style="padding:10px;text-align:left;vertical-align:top;background:#f6f7fb;border-bottom:1px solid #e4e7ec;">{html.escape(column["label"])}</th>'
+            for column in block["columns"]
+        )
+        rows = "".join(
+            "<tr>"
+            + "".join(
+                f'<td style="padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid #e4e7ec;">{html.escape(row[column["id"]])}</td>'
+                for column in block["columns"]
+            )
+            + "</tr>"
+            for row in block["rows"]
+        )
+        return (
+            f'<table id="{block_id}" width="100%" cellpadding="0" cellspacing="0" border="0" '
+            f'style="{text_style}margin:16px 0;border:1px solid #e4e7ec;border-collapse:collapse;">'
+            f"<thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
+        )
+    if kind == "media":
+        usage = (
+            f'<p style="{text_style}margin:8px 0;color:#667085;">{html.escape(block["usage"])}</p>'
+            if block["usage"]
+            else ""
+        )
+        deep_link = (
+            f'<p style="{text_style}margin:10px 0 0;"><a href="{_attribute(block["deep_link"])}" '
+            'target="_blank" rel="noopener noreferrer" style="color:#6558e8;text-decoration:underline;">打开对应视频位置</a></p>'
+            if block["deep_link"]
+            else ""
+        )
+        return (
+            f'<table id="{block_id}" width="100%" cellpadding="0" cellspacing="0" border="0" '
+            'style="margin:18px 0;border:1px solid #e4e7ec;border-collapse:separate;border-spacing:0;background:#ffffff;">'
+            f'<tr><td><img src="{_image_uri(block["image"], base_dir)}" alt="{_attribute(block["alt"])}" '
+            'style="display:block;width:100%;max-width:100%;height:auto;background:#111827;"></td></tr>'
+            f'<tr><td style="padding:16px;"><h3 style="{text_style}margin:0 0 8px;font-size:19px;">{html.escape(block["headline"])}</h3>'
+            f'<p style="{text_style}margin:0;color:#667085;">{html.escape(block["explanation"])}</p>{usage}{deep_link}</td></tr></table>'
+        )
+    if kind == "feature_grid":
+        categories = list(dict.fromkeys(card["category"] for card in block["cards"]))
+        groups = []
+        for category in categories:
+            cards = []
+            for card in (item for item in block["cards"] if item["category"] == category):
+                link = (
+                    f'<p style="{text_style}margin:10px 0 0;"><a href="{_attribute(card["link"])}" '
+                    'target="_blank" rel="noopener noreferrer" style="color:#6558e8;text-decoration:underline;">查看详情</a></p>'
+                    if card["link"]
+                    else ""
+                )
+                cards.append(
+                    f'<article style="margin:10px 0;padding:14px;border:1px solid #e4e7ec;background:#ffffff;">'
+                    f'<h4 style="{text_style}margin:0 0 7px;font-size:16px;">{html.escape(card["title"])}</h4>'
+                    f'<p style="{text_style}margin:0;color:#667085;">{html.escape(card["description"])}</p>{link}</article>'
+                )
+            groups.append(
+                f'<section style="margin:16px 0;"><h3 style="{text_style}margin:0 0 8px;font-size:18px;color:#6558e8;">'
+                f'{html.escape(category)}</h3>{"".join(cards)}</section>'
+            )
+        return f'<div id="{block_id}" style="margin:18px 0;">{"".join(groups)}</div>'
+    if kind == "code":
+        return (
+            f'<pre id="{block_id}" style="margin:16px 0;padding:16px;background:#1f2430;color:#e9edf5;'
+            'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;">'
+            f'<code>{html.escape(block["text"])}</code></pre>'
+        )
+    if kind == "flow":
+        labels = {node["id"]: node["label"] for node in block["nodes"]}
+        items = (
+            [
+                f"{labels[edge['from']]} → {labels[edge['to']]}"
+                + (f": {edge['label']}" if edge["label"] else "")
+                for edge in block["edges"]
+            ]
+            if block["edges"]
+            else [node["label"] for node in block["nodes"]]
+        )
+        return (
+            f'<ol id="{block_id}" style="{text_style}margin:16px 0;padding-left:24px;">'
+            + "".join(f"<li style=\"margin:6px 0;\">{html.escape(item)}</li>" for item in items)
+            + "</ol>"
+        )
+    if kind == "accordion":
+        children = "".join(_render_email_block(child, base_dir) for child in block["blocks"])
+        return (
+            f'<section id="{block_id}" style="margin:18px 0;padding:16px;border:1px solid #e4e7ec;background:#fbfbfe;">'
+            f'<h3 style="{text_style}margin:0 0 10px;font-size:19px;">{html.escape(block["title"])}</h3>{children}</section>'
+        )
+    raise AssertionError(f"unknown normalized block: {kind}")
+
+
+def _render_email_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
+    """Render an Apple Mail/static-preview HTML document with inline styles only."""
+    base = None if base_dir is None else Path(base_dir)
+    normalized = normalize_video_note(note, base_dir=base)
+    meta = normalized["meta"]
+    title = html.escape(meta["title"])
+    badge = f"{html.escape(meta['platform'])} · {html.escape(meta['source_id'])}"
+    author = html.escape(meta["author"] or "未提供")
+    navigation = " · ".join(
+        f'<a href="#{_source_dom_id(section["id"])}" style="color:#6558e8;text-decoration:underline;">{html.escape(section["title"])}</a>'
+        for section in normalized["sections"]
+    )
+    sections = "".join(
+        f'<section id="{_source_dom_id(section["id"])}" style="margin:24px 0;padding:24px;background:#ffffff;border:1px solid #e4e7ec;">'
+        f'<h2 style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'PingFang SC\',\'Hiragino Sans GB\',\'Microsoft YaHei\',sans-serif;color:#1d2330;line-height:1.3;margin:0 0 10px;font-size:26px;">{html.escape(section["title"])}</h2>'
+        f'<p style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'PingFang SC\',\'Hiragino Sans GB\',\'Microsoft YaHei\',sans-serif;color:#667085;line-height:1.65;margin:0 0 16px;">{html.escape(section["summary"])}</p>'
+        f'{"".join(_render_email_block(block, base) for block in section["blocks"])}</section>'
+        for section in normalized["sections"]
+    )
+    return f"""<!doctype html>
+<html lang="{_attribute(meta["language"])}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+</head>
+<body style="margin:0;background:#f6f7fb;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#f6f7fb;border-collapse:collapse;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:760px;border-collapse:collapse;">
+<tr><td style="padding:28px;background:#6558e8;color:#ffffff;">
+<p style="margin:0 0 10px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;font-weight:700;">{badge}</p>
+<h1 style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:36px;line-height:1.15;">{title}</h1>
+<p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:17px;line-height:1.65;">{html.escape(normalized["summary"])}</p>
+</td></tr>
+<tr><td style="padding:16px 24px;background:#ffffff;border:1px solid #e4e7ec;">
+<p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#667085;line-height:1.65;">作者：{author}　时长：{meta["duration_seconds"]:g} 秒　语言：{html.escape(meta["language"])}</p>
+</td></tr>
+<tr><td style="padding:16px 24px;background:#ffffff;border-left:1px solid #e4e7ec;border-right:1px solid #e4e7ec;">
+<p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#667085;line-height:1.65;">{navigation}</p>
+</td></tr>
+<tr><td>{sections}</td></tr>
+<tr><td style="padding:18px 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#667085;font-size:13px;line-height:1.65;">由 Codex 视频笔记工作流生成；媒体已嵌入，可离线打开或打印。</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+"""
+
+
+def render_video_note(
+    note: dict, *, base_dir: str | Path | None = None, profile: str = "web"
+) -> str:
     """Render a strict, self-contained and deterministic v2 web note."""
+    if profile == "email":
+        return _render_email_video_note(note, base_dir=base_dir)
+    if profile != "web":
+        _fail(f"profile is unsupported: {profile}")
     base = None if base_dir is None else Path(base_dir)
     normalized = normalize_video_note(note, base_dir=base)
     meta = normalized["meta"]
@@ -1020,7 +1193,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Render a portable video-note/v2 document.")
     parser.add_argument("--note", required=True, type=Path, help="Input note JSON path")
     parser.add_argument("--output", required=True, type=Path, help="Output HTML path")
-    parser.add_argument("--profile", required=True, help="Renderer profile (web)")
+    parser.add_argument("--profile", required=True, help="Renderer profile (web or email)")
     return parser
 
 
@@ -1029,8 +1202,8 @@ def main(argv: list[str] | None = None) -> int:
     note_path = args.note
     output_path = args.output
     try:
-        if args.profile != "web":
-            _fail(f"profile is unsupported in Task 3: {args.profile}")
+        if args.profile not in {"web", "email"}:
+            _fail(f"profile is unsupported: {args.profile}")
         try:
             note = json.loads(note_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -1038,7 +1211,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"note JSON is invalid at line {exc.lineno}, column {exc.colno}: "
                 f"{note_path}"
             )
-        document = render_video_note(note, base_dir=note_path.parent)
+        document = render_video_note(note, base_dir=note_path.parent, profile=args.profile)
     except (ValueError, OSError, UnicodeDecodeError) as exc:
         print(f"input error: {exc}", file=sys.stderr)
         return 2

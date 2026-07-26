@@ -369,7 +369,7 @@ def test_cli_rejects_unpaired_surrogates_atomically(tmp_path, mutate, expected):
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
 
 
-def test_cli_rejects_bad_json_and_email_profile_without_output(tmp_path):
+def test_cli_rejects_bad_json_without_output(tmp_path):
     malformed = tmp_path / "malformed.json"
     malformed.write_text("{", encoding="utf-8")
     malformed_output = tmp_path / "malformed.html"
@@ -377,13 +377,6 @@ def test_cli_rejects_bad_json_and_email_profile_without_output(tmp_path):
     assert result.returncode == 2
     assert "note JSON" in result.stderr
     assert not malformed_output.exists()
-    email_output = tmp_path / "email.html"
-    result = run_cli(
-        "--note", FIXTURES / "minimal.json", "--output", email_output, "--profile", "email"
-    )
-    assert result.returncode == 2
-    assert "profile" in result.stderr
-    assert not email_output.exists()
 
 
 def test_cli_output_io_failure_returns_3_and_cleans_temp(tmp_path, monkeypatch, capsys):
@@ -408,7 +401,7 @@ def test_cli_unexpected_failure_returns_4_without_output(tmp_path, monkeypatch, 
     monkeypatch.setattr(
         render_html,
         "render_video_note",
-        lambda note, *, base_dir=None: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda note, *, base_dir=None, profile="web": (_ for _ in ()).throw(RuntimeError("boom")),
     )
     exit_code = main([
         "--note", str(FIXTURES / "minimal.json"),
@@ -429,7 +422,7 @@ def test_cli_defensively_rejects_unencodable_renderer_output(
     monkeypatch.setattr(
         render_html,
         "render_video_note",
-        lambda note, *, base_dir=None: "\ud800",
+        lambda note, *, base_dir=None, profile="web": "\ud800",
     )
 
     exit_code = main([
