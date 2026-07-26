@@ -12,6 +12,44 @@
 
 如果下载、模型或可选工具不可用，工作流必须说明降级原因，不得虚构字幕或图文分析。
 
+## HTML 输出
+
+HTML 渲染器读取严格的 `video-note/v2`，schema 位于
+`references/schema/video-note-v2.schema.json`。生成 reader-facing `note.json`
+后，可输出交互式离线网页或静态邮件：
+
+```bash
+uv run python scripts/render_html.py \
+  --note '<输出目录>/note.json' \
+  --output '<输出目录>/note.html' \
+  --profile web
+
+uv run python scripts/render_html.py \
+  --note '<输出目录>/note.json' \
+  --output '<输出目录>/email.html' \
+  --profile email
+```
+
+`web` 是单文件、离线、可打印的响应式指南，包含目录、筛选、折叠面板和复制
+控件；`email` 面向 Apple Mail 16+ 与静态预览，不含 JavaScript，筛选内容全部
+展开，折叠内容全部可见。JPEG、PNG、WebP 会在验证后嵌入 HTML；缺图、危险
+URL、未知字段或 evidence 泄漏都会以退出码 `2` 明确失败。输出采用原子写入，
+失败不会破坏已有文件。
+
+`raw_subtitles`、OCR、grounding 和 confidence 等原始证据只可写入
+`evidence.json`，不得进入 reader HTML。Bilibili 与 YouTube 对同一份有效
+`video-note/v2` 必须生成等价的 normalized model、HTML 语法和错误行为。
+
+渲染器与 golden-reference 的完整验收：
+
+```bash
+uv run --extra dev pytest -q
+uv run --extra dev python scripts/acceptance_check.py
+```
+
+设计基线与实测参数见 `references/html-design-analysis.md`；浏览器截图、布局、
+交互、无网络和 A4 PDF 证据生成在被 git 忽略的 `acceptance/`。
+
 ## 环境要求
 
 - Python 3.11 或更高版本

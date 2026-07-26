@@ -11,6 +11,34 @@ description: YouTube视频转Obsidian笔记工作流。核心字幕与笔记流�
 - Safari 仅可复用已有登录状态；不得输入密码、验证码或 2FA，且不得尝试读取 Safari cookie 数据库。
 - 发送邮件前先生成 HTML；邮件默认只保留草稿，只有用户明确要求并显式调用邮件脚本时才发送。
 
+## 当前 HTML 渲染入口
+
+面向读者的 HTML 必须从 `video-note/v2` 生成；canonical schema 是
+`references/schema/video-note-v2.schema.json`，golden 设计参数见
+`references/html-design-analysis.md`。不要根据文字描述重新设计通用文章页。
+
+```bash
+python3 scripts/render_html.py \
+  --note '<output-dir>/note.json' \
+  --output '<output-dir>/note.html' \
+  --profile web
+```
+
+需要静态邮件时将 profile 改为 `email`。Web 输出允许 renderer-owned 交互；
+email 输出不得含脚本、折叠或仅交互可见的内容。两者均须离线单文件、嵌入已
+验证图片、拒绝危险 URL，并把原始字幕、OCR、grounding、confidence 留在
+`evidence.json`。缺图或 schema 错误必须明确失败，不可生成降级占位页。
+
+交付前必须运行：
+
+```bash
+uv run --extra dev pytest -q
+uv run --extra dev python scripts/acceptance_check.py
+```
+
+浏览器验收固定使用 Playwright CLI `0.1.17` / Headless Chromium `150`，覆盖
+1440、1024、768、390 四个视口、键盘操作、离线重载和 A4/12mm 打印。
+
 # YouTube to Obsidian 视频笔记工作流
 
 ## 核心功能
