@@ -167,22 +167,35 @@ def test_table_row_error_includes_section_block_and_row_path():
 
 def test_feature_card_and_nested_accordion_errors_have_exact_paths():
     note = fixture("all-blocks.json")
-    note["sections"][0]["blocks"][5]["cards"][0]["link"] = "file:///unsafe"
+    blocks = note["sections"][0]["blocks"]
+    grid_index, grid = next(
+        (index, block)
+        for index, block in enumerate(blocks)
+        if block["type"] == "feature_grid"
+    )
+    grid["cards"][0]["link"] = "file:///unsafe"
     with pytest.raises(
         ValueError,
         match=re.escape(
-            'note.sections[0].blocks[5][id="alpha-grid"].cards[0].link '
+            f'note.sections[0].blocks[{grid_index}][id="alpha-grid"].cards[0].link '
             "must use HTTP or HTTPS"
         ),
     ):
         normalize_video_note(note, base_dir=FIXTURES)
 
     note = fixture("all-blocks.json")
-    note["sections"][0]["blocks"][8]["blocks"][0]["text"] = ""
+    blocks = note["sections"][0]["blocks"]
+    accordion_index, accordion = next(
+        (index, block)
+        for index, block in enumerate(blocks)
+        if block["type"] == "accordion"
+    )
+    accordion["blocks"][0]["text"] = ""
     with pytest.raises(
         ValueError,
         match=re.escape(
-            'note.sections[0].blocks[8][id="alpha-accordion"].blocks[0]'
+            f'note.sections[0].blocks[{accordion_index}]'
+            '[id="alpha-accordion"].blocks[0]'
             '[id="alpha-accordion-text"].text must be a non-empty string'
         ),
     ):

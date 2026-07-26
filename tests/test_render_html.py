@@ -111,6 +111,7 @@ def test_web_profile_has_landmarks_skip_link_favicon_and_status_cards():
 def test_all_blocks_have_semantics_and_renderer_owned_interactions():
     document = render_video_note(fixture("all-blocks.json"), base_dir=FIXTURES)
     for kind in ("key", "source", "recommendation", "inference", "notice"):
+        assert f'class="callout callout-{kind}"' in document
         note = fixture("all-blocks.json")
         note["sections"][0]["blocks"][1]["kind"] = kind
         assert f'class="callout callout-{kind}"' in render_video_note(
@@ -127,7 +128,11 @@ def test_all_blocks_have_semantics_and_renderer_owned_interactions():
         '<button type="button" class="copy"',
         'aria-live="polite"',
         "已复制",
-        'class="flow" aria-label="流程图：Start → End: next">',
+        'class="flow-diagram"><svg viewBox="0 0 390 170" role="img"',
+        "<title id=\"vn-owned-flow-title-",
+        "流程图：Start → End: next</title>",
+        'class="flow-edge"',
+        'class="flow-node"',
         'class="accordion">',
         'aria-expanded="false"',
         'aria-controls="vn-owned-accordion-panel-',
@@ -139,6 +144,25 @@ def test_all_blocks_have_semantics_and_renderer_owned_interactions():
     for forbidden in ("innerHTML", "fetch(", "alert(", "console."):
         assert forbidden not in document
     assert not re.search(r'tabindex="[1-9]', document)
+
+
+def test_renderer_owned_svg_escapes_all_flow_text_and_ids():
+    note = fixture("all-blocks.json")
+    flow = next(
+        block for block in note["sections"][0]["blocks"] if block["type"] == "flow"
+    )
+    flow["nodes"][0]["label"] = "<script>alert(1)</script>"
+    flow["edges"][0]["label"] = '"><img src=x onerror=alert(1)>'
+
+    document = render_video_note(note, base_dir=FIXTURES)
+
+    assert '<figure id="vn-src-' in document
+    assert '<svg viewBox="0 0 390 170" role="img"' in document
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in document
+    assert "&quot;&gt;&lt;img src=x onerror=alert(1)&gt;" in document
+    assert "<script>alert(1)</script>" not in document
+    assert '<img src=x onerror=alert(1)>' not in document
+    assert document.count("<svg ") == 1
 
 
 @pytest.mark.parametrize(

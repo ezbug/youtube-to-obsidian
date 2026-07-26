@@ -394,6 +394,20 @@ LAYOUT_CODE = """async page => {
         gridTemplateColumns: cardsStyle?.gridTemplateColumns || null,
         columnCount: columns(cardsStyle?.gridTemplateColumns)
       },
+      callouts: Object.fromEntries(
+        ['key', 'source', 'recommendation', 'inference', 'notice'].map(kind => {
+          const element = document.querySelector(`.callout-${kind}`);
+          if (!element) return [kind, null];
+          const style = getComputedStyle(element);
+          return [kind, {
+            text: (element.textContent || '').trim(),
+            backgroundColor: style.backgroundColor,
+            borderTopColor: style.borderTopColor,
+            borderLeftColor: style.borderLeftColor,
+            borderLeftWidth: style.borderLeftWidth
+          }];
+        })
+      ),
       navAboveMain: Boolean(navBox && mainBox && navBox.bottom <= mainBox.top + 1),
       headingsVisible: [...document.querySelectorAll('section h2')].every(heading => {
         const box = heading.getBoundingClientRect();
@@ -723,13 +737,16 @@ def _run_interactions(
                 alt: image.alt, useful: image.alt.trim().length >= 4 &&
                   !/^(image|photo|picture|图片|图像)$/i.test(image.alt.trim())
               }));
-              const flow = document.querySelector('.flow');
+              const flow = document.querySelector('.flow-diagram svg[role="img"]');
+              const flowTitleId = flow?.getAttribute('aria-labelledby');
+              const flowTitle = flowTitleId ? document.getElementById(flowTitleId) : null;
               const nav = document.querySelector('nav');
               const groups = [...document.querySelectorAll('[role="group"]')];
               return {
                 positiveTabindex,
                 mediaAlt,
-                flowLabel: flow?.getAttribute('aria-label') || null,
+                flowLabel: flowTitle?.textContent || flow?.getAttribute('aria-label') || null,
+                rendererOwnedSvgCount: document.querySelectorAll('.flow-diagram svg[role="img"]').length,
                 navLabel: nav?.getAttribute('aria-label') || null,
                 groupLabels: groups.map(group => group.getAttribute('aria-label')),
                 labelledSections: [...document.querySelectorAll('section')].every(section => {
@@ -970,6 +987,43 @@ def _hard_checks(
     for name, expected in COLOR_TOKENS.items():
         actual = candidate["1440"]["colors"][name]
         add(f"color token {name}", actual == expected, actual, expected)
+    expected_callouts = {
+        "key": {
+            "backgroundColor": "rgb(255, 251, 237)",
+            "borderLeftColor": "rgb(232, 201, 72)",
+            "borderLeftWidth": "2px",
+        },
+        "source": {
+            "backgroundColor": "rgb(237, 250, 250)",
+            "borderLeftColor": "rgb(15, 139, 153)",
+            "borderLeftWidth": "4px",
+        },
+        "recommendation": {
+            "backgroundColor": "rgb(236, 253, 245)",
+            "borderLeftColor": "rgb(31, 157, 104)",
+            "borderLeftWidth": "4px",
+        },
+        "inference": {
+            "backgroundColor": "rgb(245, 240, 255)",
+            "borderLeftColor": "rgb(124, 77, 206)",
+            "borderLeftWidth": "4px",
+        },
+        "notice": {
+            "backgroundColor": "rgb(255, 244, 232)",
+            "borderLeftColor": "rgb(233, 131, 36)",
+            "borderLeftWidth": "4px",
+        },
+    }
+    for kind, expected in expected_callouts.items():
+        actual = candidate["1440"]["callouts"][kind]
+        add(
+            f"{kind} callout computed style",
+            actual is not None
+            and bool(actual["text"])
+            and all(actual[field] == value for field, value in expected.items()),
+            actual,
+            {"nonEmptyText": True, **expected},
+        )
     add(
         "hero radius",
         candidate["1440"]["hero"]["borderRadius"] == "28px",
@@ -1149,6 +1203,7 @@ def _hard_checks(
     add(
         "labelled flow navigation controls and sections",
         bool(semantics["flowLabel"])
+        and semantics["rendererOwnedSvgCount"] > 0
         and bool(semantics["navLabel"])
         and all(semantics["groupLabels"])
         and semantics["labelledSections"]

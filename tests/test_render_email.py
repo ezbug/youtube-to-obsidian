@@ -281,6 +281,22 @@ def test_static_email_audit_allows_embedded_images_and_reader_links():
     assert static_email_violations(snippet) == []
 
 
+def test_all_blocks_email_visibly_covers_every_semantic_callout():
+    document = render_email(fixture("all-blocks.json"))
+
+    expected = {
+        "An official source fact.": ("#edfafa", "#0f8b99"),
+        "A practical recommendation.": ("#ecfdf5", "#1f9d68"),
+        "A clearly labelled inference.": ("#f5f0ff", "#7c4dce"),
+        "An important notice.": ("#fff4e8", "#e98324"),
+        "A key point.": ("#fffbed", "#e8c948"),
+    }
+    for text, (background, border) in expected.items():
+        assert text in document
+        assert f"background:{background};border-left:4px solid {border};" in document
+    assert static_email_violations(document) == []
+
+
 def test_email_expands_every_valid_accordion_child_once_in_order():
     note = fixture("all-blocks.json")
     accordion = next(

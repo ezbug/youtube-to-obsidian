@@ -18,6 +18,10 @@
       "blocks": [
         {"id": "alpha-paragraph", "type": "paragraph", "text": "A paragraph."},
         {"id": "alpha-callout", "type": "callout", "kind": "key", "text": "A key point."},
+        {"id": "alpha-source", "type": "callout", "kind": "source", "text": "An official source fact."},
+        {"id": "alpha-recommendation", "type": "callout", "kind": "recommendation", "text": "A practical recommendation."},
+        {"id": "alpha-inference", "type": "callout", "kind": "inference", "text": "A clearly labelled inference."},
+        {"id": "alpha-notice", "type": "callout", "kind": "notice", "text": "An important notice."},
         {"id": "alpha-list", "type": "list", "items": ["First", "Second"]},
         {"id": "alpha-table", "type": "table", "columns": [{"id": "name", "label": "Name"}], "rows": [{"name": "One"}]},
         {"id": "alpha-media", "type": "media", "image": "media/frame.jpg", "alt": "Frame", "headline": "A frame", "explanation": "What the frame shows."},

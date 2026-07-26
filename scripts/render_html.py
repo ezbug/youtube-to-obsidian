@@ -710,8 +710,12 @@ code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 pre{margin:0;padding:52px 18px 18px;color:#e9edf5;overflow:auto;font-size:13px;line-height:1.6;white-space:pre}
 .copy{position:absolute;right:10px;top:10px;border:0;border-radius:9px;padding:7px 10px;cursor:pointer}
 .copy-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0;padding:0;list-style:none}
-.flow li{background:#fff;border:1px solid var(--border);border-radius:999px;padding:7px 10px}
+.flow-diagram{margin:16px 0;border:1px solid var(--border);border-radius:16px;background:#fafbfe;overflow:auto}
+.flow-diagram svg{display:block;width:100%;min-width:360px;height:auto}
+.flow-edge{stroke:var(--accent);stroke-width:3;fill:none}
+.flow-node{fill:#fff;stroke:var(--border);stroke-width:2}
+.flow-node-label{fill:var(--text);font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}
+.flow-edge-label{fill:var(--muted);font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}
 .accordion{border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-top:10px}
 .accordion-toggle{width:100%;border:0;background:#fff;text-align:left;padding:14px 16px;font-weight:700;font-size:15px;cursor:pointer;display:flex;justify-content:space-between}
 .accordion-panel{border-top:1px solid var(--border);padding:15px;background:#fbfbfe}
@@ -932,11 +936,69 @@ def _render_block(block: dict, base_dir: Path | None) -> str:
         else:
             items = [node["label"] for node in block["nodes"]]
         accessible_label = "流程图" + (f"：{'；'.join(items)}" if items else "")
+        node_width = 140
+        node_height = 54
+        node_gap = 50
+        margin = 30
+        diagram_height = 170
+        positions = {
+            node["id"]: (
+                margin + index * (node_width + node_gap),
+                72,
+            )
+            for index, node in enumerate(block["nodes"])
+        }
+        diagram_width = max(
+            360,
+            margin * 2
+            + max(1, len(block["nodes"])) * node_width
+            + max(0, len(block["nodes"]) - 1) * node_gap,
+        )
+        marker_id = _owned_dom_id("flow-arrow", block["id"])
+        title_id = _owned_dom_id("flow-title", block["id"])
+        edges = []
+        for edge in block["edges"]:
+            source_x, source_y = positions[edge["from"]]
+            target_x, target_y = positions[edge["to"]]
+            x1 = source_x + node_width / 2
+            y1 = source_y + node_height / 2
+            x2 = target_x + node_width / 2
+            y2 = target_y + node_height / 2
+            label = (
+                f'<text class="flow-edge-label" x="{(x1 + x2) / 2:g}" '
+                f'y="{min(y1, y2) - 38:g}" text-anchor="middle">'
+                f'{html.escape(edge["label"])}</text>'
+                if edge["label"]
+                else ""
+            )
+            edges.append(
+                f'<path class="flow-edge" d="M {x1:g} {y1:g} L {x2:g} {y2:g}" '
+                f'marker-end="url(#{marker_id})"/>{label}'
+            )
+        nodes = []
+        for node in block["nodes"]:
+            x, y = positions[node["id"]]
+            visible_label = (
+                node["label"]
+                if len(node["label"]) <= 18
+                else node["label"][:17] + "…"
+            )
+            nodes.append(
+                f'<g><rect class="flow-node" x="{x:g}" y="{y:g}" '
+                f'width="{node_width}" height="{node_height}" rx="16"/>'
+                f'<text class="flow-node-label" x="{x + node_width / 2:g}" '
+                f'y="{y + 33:g}" text-anchor="middle">'
+                f"{html.escape(visible_label)}</text></g>"
+            )
         return (
-            f'<ol id="{block_id}" class="flow" '
-            f'aria-label="{_attribute(accessible_label)}">'
-            + "".join(f"<li>{html.escape(item)}</li>" for item in items)
-            + "</ol>"
+            f'<figure id="{block_id}" class="flow-diagram">'
+            f'<svg viewBox="0 0 {diagram_width} {diagram_height}" role="img" '
+            f'aria-labelledby="{title_id}"><title id="{title_id}">'
+            f"{html.escape(accessible_label)}</title>"
+            f'<defs><marker id="{marker_id}" markerWidth="10" markerHeight="10" '
+            'refX="8" refY="3" orient="auto" markerUnits="strokeWidth">'
+            '<path d="M0,0 L0,6 L9,3 z" fill="#6558e8"/></marker></defs>'
+            f'{"".join(edges)}{"".join(nodes)}</svg></figure>'
         )
     if kind == "accordion":
         toggle_id = _owned_dom_id("accordion-toggle", block["id"])
