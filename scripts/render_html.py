@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import html
 import json
+import os
+import sys
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -397,45 +401,412 @@ def _image_uri(path: str, base_dir: Path | None) -> str:
     return f"data:{_IMAGE_SUFFIXES[image.suffix.casefold()]};base64,{payload}"
 
 
+_FAVICON = base64.b64encode(
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    b'<rect width="64" height="64" rx="16" fill="#6558e8"/>'
+    b'<path d="M18 20h28v6H18zm0 10h20v6H18zm0 10h14v6H18z" fill="white"/>'
+    b"</svg>"
+).decode("ascii")
+
+_WEB_STYLE = """
+:root {
+  --bg:#f6f7fb; --panel:#fff; --text:#1d2330; --muted:#667085;
+  --border:#e4e7ec; --accent:#6558e8; --accent2:#8b5cf6;
+  --accent-soft:#efedff; --key:#fff2a8; --key-border:#e8c948;
+  --blue:#2878f0; --purple:#7c4dce; --orange:#e98324;
+  --red:#d64b4b; --green:#1f9d68; --cyan:#0f8b99;
+  --shadow:0 10px 28px rgba(32,37,60,.075); --r:18px;
+}
+*{box-sizing:border-box;min-width:0}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;line-height:1.65;overflow-wrap:anywhere}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.skip-link{position:fixed;z-index:100;left:16px;top:12px;padding:10px 14px;border-radius:10px;background:var(--text);color:#fff;transform:translateY(-160%)}
+.skip-link:focus{transform:translateY(0)}
+.shell{max-width:1280px;margin:auto;display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;padding:24px}
+nav{position:sticky;top:16px;height:fit-content;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
+nav strong{display:block;margin:4px 8px 10px}
+nav a{display:block;color:var(--muted);padding:7px 9px;border-radius:9px;font-size:14px}
+nav a:hover{background:var(--accent-soft);color:var(--accent);text-decoration:none}
+main{min-width:0}
+.hero{border-radius:28px;padding:34px;border:1px solid var(--border);background:linear-gradient(135deg,#fff 0%,#f2efff 60%,#eef8ff 100%);box-shadow:var(--shadow)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:700}
+h1{font-size:clamp(31px,5vw,50px);line-height:1.12;margin:12px 0 10px}
+h2{font-size:26px;margin:0 0 14px}
+h3{font-size:19px;margin:0 0 8px}
+.lead{font-size:18px;color:var(--muted);max-width:920px}
+.status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:22px}
+.status{padding:14px;border:1px solid var(--border);border-radius:14px;background:#fff}
+.status b{display:block;font-size:20px}
+.status small,.section-summary,.media-explanation,.usage{color:var(--muted)}
+section{margin-top:24px;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:26px;box-shadow:var(--shadow)}
+.callout{margin:14px 0;padding:13px 15px;border-radius:10px}
+.callout-key{border:2px solid var(--key-border);background:#fffbed}
+.callout-source{border-left:4px solid var(--cyan);background:#edfafa}
+.callout-recommendation{border-left:4px solid var(--green);background:#ecfdf5}
+.callout-inference{border-left:4px solid var(--purple);background:#f5f0ff}
+.callout-notice{border-left:4px solid var(--orange);background:#fff4e8}
+.table-wrap,.codebox{max-width:100%;overflow:auto}
+.table-wrap{margin:16px 0;border:1px solid var(--border);border-radius:14px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;vertical-align:top;padding:11px;border-bottom:1px solid var(--border)}
+th{background:#fafafe}
+.figure-card{margin:18px 0;border:1px solid var(--border);border-radius:15px;overflow:hidden;background:#fff}
+.figure-card img{display:block;width:100%;max-height:560px;object-fit:contain;background:#111827}
+.card-copy{padding:16px}
+.media-headline{margin:0 0 6px}
+.media-explanation,.usage{margin:6px 0}
+.feature-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.filter-btn{border:1px solid var(--border);background:#fff;color:var(--text);padding:8px 11px;border-radius:10px;cursor:pointer}
+.filter-btn.active,.filter-btn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.feature-card{border:1px solid var(--border);border-radius:15px;padding:16px;background:#fff}
+.feature-card[hidden]{display:none}
+.tag{display:inline-block;margin-bottom:9px;font-size:12px;border-radius:999px;padding:3px 8px;background:#f1f3f8;color:var(--muted)}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.codebox{position:relative;margin:16px 0;background:#1f2430;border:1px solid #2c3343;border-radius:14px}
+pre{margin:0;padding:52px 18px 18px;color:#e9edf5;overflow:auto;font-size:13px;line-height:1.6;white-space:pre}
+.copy{position:absolute;right:10px;top:10px;border:0;border-radius:9px;padding:7px 10px;cursor:pointer}
+.copy-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0;padding:0;list-style:none}
+.flow li{background:#fff;border:1px solid var(--border);border-radius:999px;padding:7px 10px}
+.accordion{border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-top:10px}
+.accordion-toggle{width:100%;border:0;background:#fff;text-align:left;padding:14px 16px;font-weight:700;font-size:15px;cursor:pointer;display:flex;justify-content:space-between}
+.accordion-panel{border-top:1px solid var(--border);padding:15px;background:#fbfbfe}
+img,video,svg,canvas{max-width:100%;height:auto}
+.footer{color:var(--muted);font-size:13px;padding:24px 4px}
+@media(max-width:960px){
+  .shell{grid-template-columns:1fr;padding:13px}
+  nav{position:static}
+  .cards{grid-template-columns:1fr 1fr}
+  .status-grid{grid-template-columns:1fr}
+}
+@media(max-width:620px){
+  .cards{grid-template-columns:1fr}
+  section,.hero{padding:19px}
+}
+@media print{
+  nav,.feature-toolbar,.copy,.accordion-toggle,.skip-link{display:none!important}
+  .shell{display:block;max-width:none;padding:0}
+  main{width:100%}
+  section,.hero,.figure-card,.feature-card{box-shadow:none;break-inside:avoid}
+  .accordion-panel[hidden]{display:block}
+}
+"""
+
+_WEB_SCRIPT = """
+document.querySelectorAll('.feature-toolbar').forEach((toolbar) => {
+  const cards = toolbar.closest('.feature-block').querySelectorAll('.feature-card');
+  toolbar.querySelectorAll('.filter-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const selected = button.dataset.filter;
+      button.setAttribute('aria-pressed', 'true');
+      toolbar.querySelectorAll('.filter-btn').forEach((item) => {
+        const active = item === button;
+        item.setAttribute('aria-pressed', String(active));
+        item.classList.toggle('active', active);
+      });
+      cards.forEach((card) => {
+        card.hidden = selected !== 'all' && card.dataset.category !== selected;
+      });
+    });
+  });
+});
+
+document.querySelectorAll('.accordion-toggle').forEach((button) => {
+  button.addEventListener('click', () => {
+    const expanded = button.getAttribute('aria-expanded') === 'true';
+    const panel = document.getElementById(button.getAttribute('aria-controls'));
+    button.setAttribute('aria-expanded', String(!expanded));
+    panel.hidden = expanded;
+    button.querySelector('.accordion-symbol').textContent = expanded ? '＋' : '−';
+  });
+});
+
+async function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  const copied = document.execCommand('copy');
+  helper.remove();
+  if (!copied) throw new Error('copy unavailable');
+}
+
+document.querySelectorAll('.copy').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const code = document.getElementById(button.dataset.copyTarget);
+    const status = document.getElementById(button.dataset.statusTarget);
+    try {
+      await copyText(code.textContent);
+      status.textContent = '已复制';
+    } catch (error) {
+      status.textContent = '复制失败，请手动复制';
+    }
+  });
+});
+"""
+
+
+def _attribute(value) -> str:
+    return html.escape(str(value), quote=True)
+
+
 def _render_block(block: dict, base_dir: Path | None) -> str:
     kind = block["type"]
+    block_id = _attribute(block["id"])
     if kind == "paragraph":
-        return f'<p>{html.escape(block["text"])}</p>'
+        return f'<p id="{block_id}">{html.escape(block["text"])}</p>'
     if kind == "callout":
-        return f'<aside class="callout callout-{block["kind"]}">{html.escape(block["text"])}</aside>'
+        return (
+            f'<aside id="{block_id}" class="callout callout-{block["kind"]}">'
+            f'{html.escape(block["text"])}</aside>'
+        )
     if kind == "list":
-        return "<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in block["items"]) + "</ul>"
+        items = "".join(f"<li>{html.escape(item)}</li>" for item in block["items"])
+        return f'<ul id="{block_id}">{items}</ul>'
     if kind == "table":
-        header = "".join(f"<th>{html.escape(column["label"])}</th>" for column in block["columns"])
-        rows = "".join("<tr>" + "".join(f"<td>{html.escape(row[column["id"]])}</td>" for column in block["columns"]) + "</tr>" for row in block["rows"])
-        return f'<div class="table-wrap"><table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table></div>'
+        header = "".join(
+            f'<th scope="col">{html.escape(column["label"])}</th>'
+            for column in block["columns"]
+        )
+        rows = "".join(
+            "<tr>"
+            + "".join(
+                f"<td>{html.escape(row[column['id']])}</td>"
+                for column in block["columns"]
+            )
+            + "</tr>"
+            for row in block["rows"]
+        )
+        return (
+            f'<div class="table-wrap" tabindex="0" aria-label="表格，横向滚动查看">'
+            f'<table id="{block_id}"><thead><tr>{header}</tr></thead>'
+            f"<tbody>{rows}</tbody></table></div>"
+        )
     if kind == "media":
-        usage = f'<p class="usage">{html.escape(block["usage"])}</p>' if block["usage"] else ""
-        return f'<article class="figure-card"><img src="{_image_uri(block["image"], base_dir)}" alt="{html.escape(block["alt"])}"><div class="card-copy"><p class="time">{html.escape(block["headline"])}</p><p class="analysis">{html.escape(block["explanation"])}</p>{usage}</div></article>'
+        usage = (
+            f'<p class="usage">{html.escape(block["usage"])}</p>'
+            if block["usage"]
+            else ""
+        )
+        deep_link = (
+            f'<p><a href="{_attribute(block["deep_link"])}" target="_blank" '
+            'rel="noopener noreferrer">打开对应视频位置</a></p>'
+            if block["deep_link"]
+            else ""
+        )
+        return (
+            f'<article id="{block_id}" class="figure-card">'
+            f'<img src="{_image_uri(block["image"], base_dir)}" '
+            f'alt="{_attribute(block["alt"])}">'
+            '<div class="card-copy">'
+            f'<h3 class="media-headline">{html.escape(block["headline"])}</h3>'
+            f'<p class="media-explanation">{html.escape(block["explanation"])}</p>'
+            f"{usage}{deep_link}</div></article>"
+        )
     if kind == "feature_grid":
-        return '<div class="feature-grid">' + "".join(f'<article data-category="{html.escape(card["category"])}"><h3>{html.escape(card["title"])}</h3><p>{html.escape(card["description"])}</p></article>' for card in block["cards"]) + "</div>"
+        categories = list(dict.fromkeys(card["category"] for card in block["cards"]))
+        buttons = [
+            '<button type="button" class="filter-btn active" aria-pressed="true" '
+            'data-filter="all">全部</button>'
+        ]
+        buttons.extend(
+            '<button type="button" class="filter-btn" aria-pressed="false" '
+            f'data-filter="{_attribute(category)}">{html.escape(category)}</button>'
+            for category in categories
+        )
+        cards = []
+        for card in block["cards"]:
+            link = (
+                f'<p><a href="{_attribute(card["link"])}" target="_blank" '
+                'rel="noopener noreferrer">查看详情</a></p>'
+                if card["link"]
+                else ""
+            )
+            cards.append(
+                '<article class="feature-card" '
+                f'data-category="{_attribute(card["category"])}">'
+                f'<span class="tag">{html.escape(card["category"])}</span>'
+                f'<h3>{html.escape(card["title"])}</h3>'
+                f'<p>{html.escape(card["description"])}</p>{link}</article>'
+            )
+        return (
+            f'<div id="{block_id}" class="feature-block">'
+            f'<div class="feature-toolbar" role="group" '
+            f'aria-label="{_attribute(block["filter_label"])} 筛选">'
+            f'{"".join(buttons)}</div><div class="feature-grid cards">'
+            f'{"".join(cards)}</div></div>'
+        )
     if kind == "code":
-        return f'<pre><code class="language-{html.escape(block["language"])}">{html.escape(block["text"])}</code></pre>'
+        code_id = f"{block_id}-code"
+        status_id = f"{block_id}-status"
+        return (
+            f'<div id="{block_id}" class="codebox">'
+            f'<button type="button" class="copy" data-copy-target="{code_id}" '
+            f'data-status-target="{status_id}" aria-label="复制代码">复制</button>'
+            f'<pre><code id="{code_id}" class="language-{_attribute(block["language"])}">'
+            f'{html.escape(block["text"])}</code></pre>'
+            f'<span id="{status_id}" class="copy-status" aria-live="polite"></span>'
+            "</div>"
+        )
     if kind == "flow":
         labels = {node["id"]: node["label"] for node in block["nodes"]}
-        return '<ol class="flow">' + "".join(f'<li>{html.escape(labels[edge["from"]])} → {html.escape(labels[edge["to"]])}{": " + html.escape(edge["label"]) if edge["label"] else ""}</li>' for edge in block["edges"]) + "</ol>"
+        if block["edges"]:
+            items = [
+                f"{labels[edge['from']]} → {labels[edge['to']]}"
+                + (f": {edge['label']}" if edge["label"] else "")
+                for edge in block["edges"]
+            ]
+        else:
+            items = [node["label"] for node in block["nodes"]]
+        accessible_label = "流程图" + (f"：{'；'.join(items)}" if items else "")
+        return (
+            f'<ol id="{block_id}" class="flow" '
+            f'aria-label="{_attribute(accessible_label)}">'
+            + "".join(f"<li>{html.escape(item)}</li>" for item in items)
+            + "</ol>"
+        )
     if kind == "accordion":
-        return f'<details><summary>{html.escape(block["title"])}</summary>{"".join(_render_block(child, base_dir) for child in block["blocks"])}</details>'
+        toggle_id = f"{block_id}-toggle"
+        panel_id = f"{block_id}-panel"
+        children = "".join(_render_block(child, base_dir) for child in block["blocks"])
+        return (
+            f'<div id="{block_id}" class="accordion">'
+            f'<button type="button" id="{toggle_id}" class="accordion-toggle" '
+            f'aria-expanded="false" aria-controls="{panel_id}">'
+            f'<span>{html.escape(block["title"])}</span>'
+            '<span class="accordion-symbol" aria-hidden="true">＋</span></button>'
+            f'<div id="{panel_id}" class="accordion-panel" role="region" '
+            f'aria-labelledby="{toggle_id}" hidden>{children}</div></div>'
+        )
     raise AssertionError(f"unknown normalized block: {kind}")
 
 
 def render_video_note(note: dict, *, base_dir: str | Path | None = None) -> str:
-    """Render a normalized v2 note without accepting user HTML or SVG."""
+    """Render a strict, self-contained and deterministic v2 web note."""
     base = None if base_dir is None else Path(base_dir)
     normalized = normalize_video_note(note, base_dir=base)
-    title = html.escape(normalized["meta"]["title"])
-    metadata = " · ".join(html.escape(str(value)) for value in (normalized["meta"]["platform"], normalized["meta"]["source_id"], normalized["meta"]["duration_seconds"], normalized["meta"]["author"]))
-    content = "".join(f'<section><div class="section-heading"><h2>{html.escape(section["title"])}</h2></div><p class="section-summary">{html.escape(section["summary"])}</p>{"".join(_render_block(block, base) for block in section["blocks"])}</section>' for section in normalized["sections"])
-    return f'''<!doctype html><html lang="{html.escape(normalized["meta"]["language"])}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
-<style>:root{{--ink:#17202a;--muted:#667085;--line:#d9dee7;--surface:#fff;--page:#f4f6f9;--accent:#b9423b;--accent-soft:#f8e8e6;--night:#233143}}*{{box-sizing:border-box}}body{{margin:0;background:var(--page);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;line-height:1.75}}main{{width:min(960px,calc(100% - 32px));margin:32px auto 64px;background:var(--surface);padding:56px 64px;box-shadow:0 12px 32px rgba(20,31,46,.1)}}header{{padding-bottom:28px;border-bottom:3px solid var(--accent)}}.kicker,.time{{color:var(--accent);font-size:13px;font-weight:700}}h1{{font-size:clamp(30px,5vw,48px);line-height:1.2;margin:0}}.metadata,.section-summary{{color:var(--muted)}}section{{margin-top:42px}}h2{{font-size:26px;line-height:1.25}}.table-wrap{{overflow:auto}}table{{width:100%;border-collapse:collapse}}th{{background:var(--night);color:#fff;text-align:left;padding:10px 12px}}td{{padding:10px 12px;border-bottom:1px solid var(--line)}}.figures{{display:grid;gap:22px}}.figure-card{{margin:18px 0;border:1px solid var(--line)}}.figure-card img{{display:block;width:100%;max-height:500px;object-fit:contain;background:#111827}}.card-copy{{padding:14px 18px 18px}}.time{{display:inline-block;margin:0 0 8px;padding:2px 9px;background:var(--accent-soft)}}.analysis{{margin:0}}.callout{{padding:12px;border-left:4px solid var(--accent);background:var(--accent-soft)}}.feature-grid{{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}.feature-grid article{{border:1px solid var(--line);padding:12px}}pre{{overflow:auto;background:#17202a;color:#fff;padding:14px}}@media print{{body{{background:#fff}}main{{width:auto;margin:0;padding:0;box-shadow:none}}.figure-card{{break-inside:avoid}}}}@media(max-width:640px){{main{{width:100%;margin:0;padding:30px 20px}}}}</style></head><body><main><header><p class="kicker">CODEX VIDEO NOTE</p><h1>{title}</h1><p class="metadata">{metadata}</p></header>{content}<footer>由 Codex 视频笔记工作流生成，图片已嵌入本 HTML，可离线打开或打印为 PDF。</footer></main></body></html>'''
-
-
+    meta = normalized["meta"]
+    title = html.escape(meta["title"])
+    badge = f"{html.escape(meta['platform'])} · {html.escape(meta['source_id'])}"
+    author = html.escape(meta["author"] or "未提供")
+    navigation = "".join(
+        f'<a href="#{_attribute(section["id"])}">{html.escape(section["title"])}</a>'
+        for section in normalized["sections"]
+    )
+    sections = "".join(
+        f'<section id="{_attribute(section["id"])}" aria-labelledby="{_attribute(section["id"])}-title">'
+        f'<h2 id="{_attribute(section["id"])}-title">{html.escape(section["title"])}</h2>'
+        f'<p class="section-summary">{html.escape(section["summary"])}</p>'
+        f'{"".join(_render_block(block, base) for block in section["blocks"])}</section>'
+        for section in normalized["sections"]
+    )
+    return f"""<!doctype html>
+<html lang="{_attribute(meta["language"])}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<link rel="icon" href="data:image/svg+xml;base64,{_FAVICON}">
+<style>{_WEB_STYLE}</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">跳到主要内容</a>
+<div class="shell">
+<nav aria-label="视频笔记目录"><strong>目录</strong>{navigation}</nav>
+<main id="main-content">
+<header class="hero">
+<span class="badge">{badge}</span>
+<h1>{title}</h1>
+<p class="lead">{html.escape(normalized["summary"])}</p>
+<div class="status-grid">
+<div class="status"><b>{author}</b><small>作者</small></div>
+<div class="status"><b>{meta["duration_seconds"]:g} 秒</b><small>时长</small></div>
+<div class="status"><b>{html.escape(meta["language"])}</b><small>语言</small></div>
+</div>
+</header>
+{sections}
+<footer class="footer">由 Codex 视频笔记工作流生成；媒体已嵌入，可离线打开或打印。</footer>
+</main>
+</div>
+<script>{_WEB_SCRIPT}</script>
+</body>
+</html>
+"""
 def render_document(meta: dict, sections: list) -> str:
     """Retain the legacy Bilibili caller API while rendering through v2."""
     normalized = normalize_legacy_document(meta, sections)
     return render_video_note(normalized)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Render a portable video-note/v2 document.")
+    parser.add_argument("--note", required=True, type=Path, help="Input note JSON path")
+    parser.add_argument("--output", required=True, type=Path, help="Output HTML path")
+    parser.add_argument("--profile", required=True, help="Renderer profile (web)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    note_path = args.note
+    output_path = args.output
+    try:
+        if args.profile != "web":
+            _fail(f"profile is unsupported in Task 3: {args.profile}")
+        try:
+            note = json.loads(note_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _fail(
+                f"note JSON is invalid at line {exc.lineno}, column {exc.colno}: "
+                f"{note_path}"
+            )
+        document = render_video_note(note, base_dir=note_path.parent)
+    except (ValueError, OSError, UnicodeError) as exc:
+        print(f"input error: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"unexpected renderer error: {exc}", file=sys.stderr)
+        return 4
+
+    temporary_path = None
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(document)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    except OSError as exc:
+        print(f"output I/O error: {output_path}: {exc}", file=sys.stderr)
+        return 3
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
