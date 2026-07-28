@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="#功能展示">功能展示</a> ·
+  <a href="#obsidian-workflow">Obsidian</a> ·
   <a href="#工作流">工作流</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#html-与-pdf">HTML 与 PDF</a> ·
@@ -27,6 +28,7 @@
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-%E2%89%A53.11-2878f0">
   <img alt="video-note v2" src="https://img.shields.io/badge/schema-video--note%2Fv2-8b5cf6">
   <img alt="HTML and PDF" src="https://img.shields.io/badge/output-HTML%20%2B%20PDF-25b7c5">
+  <img alt="Obsidian ready" src="https://img.shields.io/badge/knowledge-Obsidian--ready-7c3aed">
   <img alt="offline first" src="https://img.shields.io/badge/runtime-offline--first-1e9b78">
 </p>
 
@@ -131,6 +133,36 @@ Agent 或宿主应先读字幕、划分章节并理解每一部分要回答的�
 最终总结不是逐句缩写，而是围绕主题建立清楚的因果结构：先给出核心判断，再解释
 依据、适用条件和实践建议。归档时，Agent 会根据整篇内容生成能代表主题与主要
 结论的标题，而不是沿用“video ID 总结”之类的机械文件名。
+
+<a id="obsidian-workflow"></a>
+
+### 8. Obsidian 集成：从一次性交付到长期知识库
+
+<p align="center">
+  <img src=".github/assets/readme/feature-obsidian.png" alt="Codex 将视频笔记 HTML、附件和可选 Markdown 索引交付到用户指定的 Obsidian Vault" width="1280">
+</p>
+
+HTML 解决一次阅读，Obsidian 负责长期积累。当用户或 Agent 明确选择 Vault
+或其子目录后，Skill 可以把已验收页面、代表截图和可选 Markdown 索引放进同一套
+知识结构；没有配置时不会猜测路径，也不会偷偷写入个人知识库。
+
+- 截图进入独立的 `<标题>_attachments/`，Markdown 使用
+  `![[附件文件]]`，让 Obsidian 正确显示并追踪 Vault 内图片。
+- 可选索引使用 YAML Properties 保存 `title`、`source`、`tags`、`related`
+  等元数据，用 callouts 突出结论，用 wikilinks 连接相关主题。
+- 已验收 Web HTML 仍是默认读者交付物；Obsidian 是可选的归档、索引和关联层，
+  不是对 HTML 的替代。
+- 不再额外生成 `.canvas` 导图。HTML 已承担完整信息结构，避免同一内容维护两套
+  容易分叉的展示文件。
+
+```text
+Codex → 字幕 / 截图 / 总结 → HTML + attachments
+                                  │
+                                  └─ 用户明确选择 Vault
+                                      → Properties
+                                      → Callouts
+                                      → Wikilinks
+```
 
 ## 工作流
 
