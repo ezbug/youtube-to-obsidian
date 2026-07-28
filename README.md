@@ -1,3 +1,11 @@
+<p align="center">
+  <img
+    src=".github/assets/video-note-hero.png"
+    alt="Video Note 将视频转换为可验证知识页面的七项能力图"
+    width="1280"
+  />
+</p>
+
 # youtube-to-obsidian
 
 将 YouTube 视频转换为可追溯的 Obsidian 笔记和经过浏览器验收的单文件 HTML。
