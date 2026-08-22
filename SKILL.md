@@ -42,6 +42,32 @@ python3 scripts/archive_html.py \
 要求时才用 `--profile email` 归档为 `<代表性标题>—Email.html`。PDF 只是打印
 验收证据，不能代替最终 HTML。
 
+## 可选：官方 Obsidian Web Clipper 交接（HTML 外置归档）
+
+只有用户明确要求把本次 HTML 笔记交接到 Obsidian 时才启用本节；默认流程不
+直接写入 Vault。最终 HTML 必须留在调用者明确指定的 `archive-dir`，绝不复制
+到 Vault。交接时使用官方 Obsidian Web Clipper 作为唯一写入入口：
+
+1. 在 `127.0.0.1` 上启动临时静态服务展示归档 HTML：
+   `python3 -m http.server 0 --bind 127.0.0.1 --directory '<archive-dir>'`；
+   优先使用回环 HTTP URL，不为 Chrome 扩展额外开启 `file://` 访问权限。
+2. 使用无触发规则、无 fallback、关闭 Interpreter 的一次性模板，Vault 填
+   Obsidian 中显示的精确 Vault 名称，Folder 填 Vault 相对路径（例如
+   `Origin/video`），Note name 使用代表性 HTML 文件名去掉 `.html`。
+3. Properties 至少保留 `title`、原始 YouTube `source`、`source_id`、`created`、
+   `tags` 和 `html_archive`；正文用固定的 Finder 目录索引、原始视频链接，
+   再用 `{{selectorHtml:main|markdown}}` 转换 HTML 主体。`source` 不得写临时
+   `127.0.0.1` 地址。
+4. 不得用文件系统、Obsidian CLI、Advanced URI、Shell Commands 或插件 API
+   直接创建、追加或修补目标 Markdown；Obsidian CLI 只做保存后的只读核验。
+5. 验收必须确认恰好一份目标 Markdown、Vault 中没有同名 HTML、源 HTML 哈希
+   未改变、正文和 Properties 完整，并在 Reading view 点击 `file:///` Finder
+   目录链接。扩展未安装、保存预览不符、链接无法打开 Finder 或页面正文不完整
+   时立即停止，不重复保存也不绕过门槛。
+
+完成验收后停止回环 HTTP 服务，并在交付中同时报告 Markdown 路径、HTML 路径、
+源哈希、Vault/Folder、模板名称、Finder 点击结果和是否生成附件。
+
 ## 当前 HTML 渲染入口
 
 面向读者的 HTML 必须从 `video-note/v2` 生成；canonical schema 是
@@ -67,7 +93,7 @@ uv run --extra dev pytest -q
 uv run --extra dev python scripts/acceptance_check.py
 ```
 
-浏览器验收固定使用 Playwright CLI `0.1.17` / Headless Chromium `150`，覆盖
+浏览器验收固定使用 Playwright CLI `0.1.17` / Headless Chromium `151`，覆盖
 1440、1024、768、390 四个视口、键盘操作、离线重载和 A4/12mm 打印。
 
 # YouTube to Obsidian 视频笔记工作流
@@ -349,7 +375,11 @@ with open(f"{FRAMES_DIR}/ocr_results.json", "w") as f:
 
 OCR 提取的文字会在 vision 分析时一并提供给模型，帮助理解代码、按钮文本、参数面板等内容。
 
-#### 4.5 复制截图到 Obsidian vault
+#### 4.5 复制截图到 Obsidian vault（仅旧版 Markdown 路径）
+
+以下步骤只适用于用户明确选择旧版“直接生成 Markdown + 本地附件”的路径；
+当前 HTML-Web Clipper 路径不得执行它，也不得把 HTML 或 HTML 资源直接复制进
+Vault。HTML 交接按本 skill 前面的 Web Clipper 规范执行。
 
 将截图复制到 Obsidian vault 的附件文件夹，使笔记中的图片引用能正常显示：
 

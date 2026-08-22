@@ -8,7 +8,7 @@
 - uv: 0.11.7
 - Node: 22.23.1
 - CLI: 0.1.17
-- Chromium: 150.0.0.0
+- Chromium: 151.0.0.0
 - Existing package test command: `uv run --extra dev pytest -q`
 - Existing package test result: 3 passed
 

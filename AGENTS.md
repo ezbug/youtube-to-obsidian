@@ -78,7 +78,7 @@ Use:
 
 `npx --yes --package @playwright/cli@0.1.17 playwright-cli`
 
-The accepted browser is Headless Chromium `150.0.0.0`.
+The accepted browser is Headless Chromium `151.0.0.0`.
 
 Before claiming completion:
 

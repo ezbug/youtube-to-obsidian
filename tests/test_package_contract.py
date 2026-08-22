@@ -1,7 +1,21 @@
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _package_files() -> list[Path]:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tracked.returncode == 0:
+        return [ROOT / item for item in tracked.stdout.split("\0") if item]
+    return list(ROOT.rglob("*"))
 
 
 def test_skill_package_contract():
@@ -33,7 +47,7 @@ def test_readme_documents_codex_workflow():
 
 def test_no_machine_specific_paths():
     ignored = {".venv", "node_modules", ".git", "__pycache__", "acceptance"}
-    for path in ROOT.rglob("*"):
+    for path in _package_files():
         if not path.is_file() or any(part in ignored for part in path.parts):
             continue
         if path.name == "doctor.sh":
