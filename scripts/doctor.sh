@@ -22,6 +22,13 @@ if [ -f "$repo_root/pyproject.toml" ]; then
 fi
 if [ -f "$repo_root/package.json" ]; then
   check_command node
+  check_command npm
+fi
+
+if command -v obsidian >/dev/null 2>&1; then
+  printf 'OK   optional command obsidian -> %s\n' "$(command -v obsidian)"
+else
+  printf 'INFO optional command obsidian not found (required only for --apply)\n'
 fi
 if [ -f "$repo_root/requirements.system" ]; then
   while IFS= read -r command_name; do

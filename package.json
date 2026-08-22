@@ -1,0 +1,11 @@
+{
+  "name": "video-note-obsidian-import",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "dependencies": {
+    "defuddle": "0.19.2",
+    "linkedom": "0.18.13"
+  }
+}

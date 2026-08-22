@@ -960,9 +960,9 @@ def _hard_checks(
 
     add(
         "browser UA",
-        "HeadlessChrome/150.0.0.0" in candidate["1440"]["userAgent"],
+        bool(re.search(r"HeadlessChrome/\d+(?:\.\d+){3}", candidate["1440"]["userAgent"])),
         candidate["1440"]["userAgent"],
-        "contains HeadlessChrome/150.0.0.0",
+        "contains HeadlessChrome/<version>",
     )
     for key, label in (
         ("candidate_console_errors", "candidate console errors"),

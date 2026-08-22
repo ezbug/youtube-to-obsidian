@@ -67,8 +67,81 @@ uv run --extra dev pytest -q
 uv run --extra dev python scripts/acceptance_check.py
 ```
 
-浏览器验收固定使用 Playwright CLI `0.1.17` / Headless Chromium `150`，覆盖
+浏览器验收固定使用 Playwright CLI `0.1.17` / Headless Chromium，覆盖
 1440、1024、768、390 四个视口、键盘操作、离线重载和 A4/12mm 打印。
+
+## HTML → Obsidian Markdown 导入（默认路径）
+
+当用户明确指定 Obsidian Vault 和 Vault 相对目录后，静态、已通过浏览器验收的
+视频 HTML 默认使用 Defuddle + Obsidian CLI 导入。Defuddle 只提取 HTML 的
+`<main>`，关闭异步第三方回退并转换为 Obsidian Markdown；图片以 data URI
+保留在同一个 Markdown 中。
+
+HTML 归档始终留在调用者指定的外部目录，不复制 HTML 或附件到 Vault。目标
+Markdown 的唯一写入入口是官方 Obsidian CLI；不得用 Python 文件写入、Finder
+复制、Advanced URI、Shell Commands 或插件 API 绕过导入器。
+
+首次准备：
+
+```bash
+npm ci
+```
+
+默认执行 dry-run，只生成候选笔记和审计；只有显式 `--apply` 才写入 Vault：
+
+```bash
+uv run python scripts/import_html_to_obsidian.py \
+  --html '<archive-dir>/<代表性标题>.html' \
+  --vault '<Obsidian 中显示的 Vault 名称>' \
+  --folder 'Origin/video' \
+  --source '<原始 YouTube URL>' \
+  --source-id '<YouTube video ID>' \
+  --platform youtube \
+  --expected-html-sha256 '<HTML SHA-256>' \
+  --preview '/tmp/video-note-preview.md'
+
+uv run python scripts/import_html_to_obsidian.py \
+  --html '<archive-dir>/<代表性标题>.html' \
+  --vault '<Obsidian 中显示的 Vault 名称>' \
+  --folder 'Origin/video' \
+  --source '<原始 YouTube URL>' \
+  --source-id '<YouTube video ID>' \
+  --platform youtube \
+  --expected-html-sha256 '<HTML SHA-256>' \
+  --apply
+```
+
+生成的 Properties 至少包含 `title`、`source`、`source_id`、`created`、
+`tags`、`html_archive`、`html_archive_uri` 和 `source_html_sha256`，
+正文包含 Finder 目录链接、HTML 文件名、原始视频链接和完整 `main` 内容。
+
+导入器会先拒绝目标冲突、路径穿越和源哈希漂移，再通过 CLI 临时笔记分块
+`create/append inline`，读取比对成功后用 CLI `move` 交付正式笔记。任何
+失败只回收本次创建的临时文件；绝不覆盖既有笔记。CLI 输出中的 `Error:`
+即使退出码为 0 也视为失败。
+
+未带 `--apply` 时默认是 dry-run，也可显式使用 `--dry-run`。
+
+### Web Clipper 备用路径
+
+只有页面依赖登录、JavaScript 动态渲染、用户需要人工高亮，或用户明确要求
+浏览器扩展时，才使用官方 Web Clipper。静态视频 HTML 默认不需要扩展弹窗。
+Web Clipper 仍必须把 HTML 留在外部归档目录、把 `source` 写成原始 YouTube
+URL，并使用 `main` 或 `content` 转换正文；不得把临时 localhost URL 当作
+来源，也不得复制 HTML 到 Vault。
+
+导入验收：
+
+```bash
+uv run --extra dev pytest -q
+uv run --extra dev python scripts/acceptance_check.py
+obsidian vault='<Vault>' read path='Origin/video/<标题>.md'
+obsidian vault='<Vault>' properties path='Origin/video/<标题>.md' format=yaml
+obsidian vault='<Vault>' dev:errors
+```
+
+若 Obsidian 未运行、CLI 未启用、Vault 或目录未明确指定，停止并报告原因，不猜测
+个人路径。
 
 # YouTube to Obsidian 视频笔记工作流
 
@@ -655,7 +728,7 @@ related:
 
 - youtube-subtitle-extractor：YouTube字幕下载（yt-dlp，备用方案）
 - youtube-transcript-api：YouTube字幕提取（Python库，首选方案，`pip install youtube-transcript-api`）
-- defuddle：页面内容提取（去广告/导航，可选）
+- Defuddle + 官方 Obsidian CLI：静态 HTML 转 Markdown 并写入 Vault（默认导入路径）
 - video-summary：AI总结生成
 - **ffmpeg**：视频关键帧截图（`brew install ffmpeg`）
 - **Hermes vision 能力** / **`vision_analysis` MCP**：截图画面内容分析（本地模型已部署，通过 MCP 调度，免费）
@@ -695,7 +768,8 @@ related:
 
 1. **yt-dlp 403 错误**：YouTube 自 2025 年起强制 SABR 流媒体，yt-dlp 下载视频/音频经常 403。字幕提取用 `youtube-transcript-api`（纯 Python，不受影响）。元数据用 `yt-dlp --dump-json`（通常不触发 403）。截图时如果视频下载 403，改用 yt-dlp 缩略图模式或告知用户无法截图。
 2. **视频无字幕**：部分视频既无手动字幕也无自动字幕。此时需用 Whisper 转录音频（需 ffmpeg + 足够内存），或仅基于描述和元数据生成笔记。
-3. **defuddle 未安装**：不影响流程，用 `yt-dlp --dump-json` 或 `browser_navigate` 替代。
+3. **Obsidian 导入依赖**：进入本仓库后先运行 `npm ci`；静态 HTML 必须使用本 skill 的
+   `scripts/import_html_to_obsidian.py`，不要改回直接写 Vault 文件。
 4. **send_email.py 路径**：使用本仓库的 `scripts/send_email.py`；凭据只从运行时环境或 `EMAIL_AUTH_FILE` 读取。
 5. **ffmpeg 不在 PATH**：macOS 上可能装在 homebrew 或 krita 内部，用 `find /opt /usr/local ~/homebrew -name ffmpeg` 定位后加到 PATH。
 6. **YouTube 页面需登录**：某些视频的描述/字幕面板需要登录才能查看，browser_navigate 可能看不到完整内容。

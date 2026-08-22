@@ -7,6 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_skill_package_contract():
     assert (ROOT / "SKILL.md").is_file()
     assert (ROOT / "README.md").is_file()
+    assert (ROOT / "package.json").is_file()
+    assert (ROOT / "package-lock.json").is_file()
+    assert (ROOT / "scripts" / "defuddle_adapter.mjs").is_file()
+    assert (ROOT / "scripts" / "import_html_to_obsidian.py").is_file()
     assert (ROOT / "scripts" / "install.sh").is_file()
     assert (ROOT / "scripts" / "doctor.sh").is_file()
     assert (ROOT / "scripts" / "uninstall.sh").is_file()
@@ -29,6 +33,14 @@ def test_readme_documents_codex_workflow():
     )
     for item in required:
         assert item in readme
+
+
+def test_skill_documents_defuddle_cli_import_contract():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for document in (skill, readme):
+        for item in ("Defuddle", "Obsidian CLI", "--dry-run", "--apply", "Web Clipper"):
+            assert item in document
 
 
 def test_no_machine_specific_paths():

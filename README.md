@@ -164,6 +164,29 @@ Codex → 字幕 / 截图 / 总结 → HTML + attachments
                                       → Wikilinks
 ```
 
+#### 静态 HTML → Obsidian Markdown
+
+已通过浏览器验收的静态视频 HTML，默认由 Defuddle 提取 `<main>` 并由官方
+Obsidian CLI 写入用户明确指定的 Vault。HTML 保留在外部归档目录，Markdown
+中的 Properties、Finder 目录链接、原始视频链接和 data URI 图片一起保存。
+
+```bash
+npm ci
+uv run python scripts/import_html_to_obsidian.py \
+  --html '<archive-dir>/<标题>.html' \
+  --vault '<Vault 名称>' \
+  --folder 'Origin/video' \
+  --source '<YouTube URL>' \
+  --source-id '<YouTube video ID>' \
+  --platform youtube \
+  --expected-html-sha256 '<SHA-256>' \
+  --preview '/tmp/video-note-preview.md'
+```
+
+不带 `--apply` 时是 dry-run，也可显式使用 `--dry-run`；确认预览后再显式加入 `--apply`。目标冲突、
+哈希漂移、路径穿越和 CLI 错误都会 fail closed。动态、登录或需要人工高亮的页面
+才使用 Web Clipper 备用路径。
+
 ## 工作流
 
 ```text
@@ -205,6 +228,7 @@ output/
 git clone https://github.com/ezbug/youtube-to-obsidian.git
 cd youtube-to-obsidian
 uv sync --frozen
+npm ci
 
 ./scripts/install.sh --target codex --mode symlink
 ./scripts/doctor.sh
