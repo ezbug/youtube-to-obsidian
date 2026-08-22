@@ -80,6 +80,14 @@ def test_chunk_text_preserves_unicode_and_respects_byte_limit():
     assert all(len(chunk.encode("utf-8")) <= 64 * 1024 for chunk in chunks)
 
 
+def test_default_chunks_stay_below_obsidian_cli_utf8_transport_boundary():
+    original = "中文内容" * 10000
+    chunks = list(chunk_text(original))
+
+    assert "".join(chunks) == original
+    assert max(len(chunk.encode("utf-8")) for chunk in chunks) <= 4 * 1024
+
+
 def test_build_note_content_rejects_untrusted_platform():
     with pytest.raises(ImportFailure):
         build_note_content(

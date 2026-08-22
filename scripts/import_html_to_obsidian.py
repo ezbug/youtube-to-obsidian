@@ -14,7 +14,9 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
 
-MAX_CHUNK_BYTES = 64 * 1024
+# Obsidian CLI 1.13.7 can split UTF-8 characters at its internal 8 KiB
+# argument boundary. Keep content arguments well below that boundary.
+MAX_CHUNK_BYTES = 4 * 1024
 PLATFORMS = {"youtube": "YouTube", "bilibili": "Bilibili"}
 SOURCE_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
